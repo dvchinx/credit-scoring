@@ -1,13 +1,13 @@
-package com.creditscoring;
+package com.florez.backend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class CreditScoringApplication {
+public class BackendApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(CreditScoringApplication.class, args);
+		SpringApplication.run(BackendApplication.class, args);
 	}
 
 }

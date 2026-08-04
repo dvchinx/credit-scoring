@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: credit-scoring-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-credit_scoring}
+      POSTGRES_USER: ${POSTGRES_USER:-credit_scoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-credit_scoring}
+    ports:
+      - "5432:5432"
+    volumes:
+      - credit-scoring-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-credit_scoring}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  credit-scoring-postgres-data:

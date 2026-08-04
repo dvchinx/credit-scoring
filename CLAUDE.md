@@ -58,8 +58,9 @@ Flujo de una solicitud de crédito:
 
 ## Convenciones de código
 
-- Paquetes por **feature/dominio** (`application/`, `scoring/`, `explainability/`, `audit/`), no por capa técnica genérica.
-- DTOs separados de entidades JPA — nunca exponer entidades directamente en la API.
+- Paquetes por **feature/dominio** (`creditapplication/`, `scoring/`, `explainability/`, `audit/`), no por capa técnica genérica a nivel raíz.
+- El backend Java sigue **arquitectura hexagonal (ports & adapters)**: cada feature se organiza internamente en `domain` (modelo + reglas de negocio, sin dependencias de Spring/JPA) → `application` (casos de uso, orquestan el dominio a través de ports) → `infrastructure` (adaptadores concretos: controllers REST, repositorios JPA, seguridad). El dominio nunca depende de `application` ni `infrastructure`.
+- DTOs (en `infrastructure/in/web`) separados de entidades JPA (en `infrastructure/out/persistence`) y del modelo de dominio — nunca exponer entidades directamente en la API.
 - Usar `record` de Java para DTOs inmutables.
 - Manejo de errores centralizado con `@ControllerAdvice`.
 - **Ninguna decisión se persiste sin su explicación asociada** — si el servicio de ML no puede explicar, la decisión no se guarda como final (se marca como pendiente/error).

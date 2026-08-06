@@ -6,7 +6,10 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo qu
 
 ## Estado actual
 
-**Fase 1 — Esqueleto backend** completada: autenticación JWT, CRUD de solicitudes de crédito y persistencia en Postgres. El motor de ML (scoring + explicabilidad) llega en fases posteriores — ver [Roadmap](#roadmap).
+- **Fase 1 — Esqueleto backend** completada: autenticación JWT, CRUD de solicitudes de crédito y persistencia en Postgres.
+- **Fase 2 — Servicio de ML base** completada: microservicio Python/FastAPI (`ml-service/`) entrenado sobre el dataset público "Give Me Some Credit", expone `/score`. Ver [ml-service/README.md](ml-service/README.md).
+
+La explicabilidad (SHAP), el model registry formal y el what-if analysis llegan en fases posteriores — ver [Roadmap](#roadmap).
 
 ## Arquitectura
 
@@ -16,14 +19,14 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo qu
         ▼
 [Spring Boot API] ──► [PostgreSQL] (solicitudes, decisiones, auditoría, versiones de modelo)
         │
-        ├──► [ML Service (FastAPI)] ──► [Modelo activo + SHAP]   (fase 2+)
-        │           │
+        ├──► [ML Service (FastAPI)] ──► [Modelo activo + SHAP]
+        │           │                        └─ /score ✅ (fase 2)   /explain (fase 3)
         │           └──► /what-if (simulación de variables)      (fase 5)
         │
         └──► [Model Registry] (metadata de versiones, para trazabilidad)   (fase 4)
 ```
 
-El backend Java es responsable de la orquestación, persistencia y governance; el futuro servicio Python vivirá en un microservicio separado, responsable exclusivamente de scoring y explicabilidad.
+El backend Java es responsable de la orquestación, persistencia y governance; el servicio Python (`ml-service/`, FastAPI) vive en un microservicio separado, responsable exclusivamente de scoring y explicabilidad. La integración Java → `/score` (mapeo de `CreditApplicationRequest` a las variables del modelo) se resuelve en una fase posterior a la Fase 2.
 
 ### Backend: arquitectura hexagonal (ports & adapters)
 
@@ -52,7 +55,8 @@ com.florez.backend
 - **Seguridad:** JWT stateless (JJWT), contraseñas con BCrypt, roles `ADMIN` / `ANALYST`
 - **Observabilidad:** Spring Actuator + logs estructurados en JSON (Logstash encoder)
 - **Testing:** JUnit 5 + Mockito (unitarios) y Testcontainers + Postgres real (integración)
-- **Infraestructura:** Docker Compose para Postgres
+- **Servicio de ML:** Python + FastAPI (`ml-service/`), scikit-learn (Regresión Logística), pytest — ver [ml-service/README.md](ml-service/README.md)
+- **Infraestructura:** Docker Compose para Postgres y el servicio de ML
 
 ## Cómo levantar el entorno
 
@@ -127,7 +131,7 @@ cd backend
 ## Roadmap
 
 1. ✅ **Fase 1 — Esqueleto backend:** CRUD de solicitudes, JWT, Postgres.
-2. **Fase 2 — Servicio de ML base:** microservicio FastAPI entrenado sobre un dataset público (ej. "Give Me Some Credit"), expone `/score`.
+2. ✅ **Fase 2 — Servicio de ML base:** microservicio FastAPI entrenado sobre un dataset público ("Give Me Some Credit"), expone `/score`.
 3. **Fase 3 — Explicabilidad:** integrar SHAP, exponer `/explain`, persistir la explicación junto a cada decisión.
 4. **Fase 4 — Model registry y versionado:** metadata de cada modelo entrenado, activación de versiones, trazabilidad histórica.
 5. **Fase 5 — What-if analysis:** simulación de cambios en variables del solicitante.

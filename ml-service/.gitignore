@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Artefactos de datos y modelos: se generan localmente, no se versionan
+data/raw/*
+!data/raw/.gitkeep
+models/*
+!models/.gitkeep

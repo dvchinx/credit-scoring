@@ -17,5 +17,17 @@ services:
       timeout: 5s
       retries: 5
 
+  ml-service:
+    build: ./ml-service
+    container_name: credit-scoring-ml-service
+    restart: unless-stopped
+    environment:
+      ML_ARTIFACTS_DIR: /app/models
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ml-service/models:/app/models
+      - ./ml-service/data:/app/data
+
 volumes:
   credit-scoring-postgres-data:

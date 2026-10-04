@@ -1,5 +1,6 @@
 package com.florez.backend.creditapplication.infrastructure.in.web.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
@@ -24,5 +25,6 @@ public record CreditApplicationRequest(
         @NotNull(message = "la deuda mensual existente es obligatoria")
         @PositiveOrZero(message = "la deuda mensual existente no puede ser negativa") BigDecimal existingMonthlyDebt,
         @NotNull(message = "el número de dependientes es obligatorio")
-        @PositiveOrZero(message = "el número de dependientes no puede ser negativo") Integer numberOfDependents) {
+        @PositiveOrZero(message = "el número de dependientes no puede ser negativo") Integer numberOfDependents,
+        @NotNull(message = "el historial crediticio es obligatorio") @Valid CreditHistoryPayload creditHistory) {
 }

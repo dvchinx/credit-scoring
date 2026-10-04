@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.florez.backend.TestcontainersConfig;
 import com.florez.backend.creditapplication.domain.model.ApplicationStatus;
 import com.florez.backend.creditapplication.domain.model.CreditApplication;
+import com.florez.backend.creditapplication.domain.model.CreditHistory;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Optional;
@@ -33,6 +34,7 @@ class CreditApplicationRepositoryAdapterIT {
                 8.0,
                 new BigDecimal("300.00"),
                 2,
+                new CreditHistory(0.25, 4, 1, 0, 0, 0),
                 "analyst1");
     }
 

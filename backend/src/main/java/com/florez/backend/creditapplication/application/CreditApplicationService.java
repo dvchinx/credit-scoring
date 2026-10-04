@@ -54,7 +54,8 @@ public final class CreditApplicationService implements
                 updatedData.getLoanTermMonths(),
                 updatedData.getEmploymentYears(),
                 updatedData.getExistingMonthlyDebt(),
-                updatedData.getNumberOfDependents());
+                updatedData.getNumberOfDependents(),
+                updatedData.getCreditHistory());
 
         return repositoryPort.save(existing);
     }

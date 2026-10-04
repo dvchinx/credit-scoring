@@ -2,6 +2,7 @@ package com.florez.backend.creditapplication.infrastructure.out.persistence;
 
 import com.florez.backend.common.infrastructure.persistence.BaseJpaAuditEntity;
 import com.florez.backend.creditapplication.domain.model.ApplicationStatus;
+import com.florez.backend.creditapplication.domain.model.CreditHistory;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -42,6 +43,24 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
     @Column(name = "number_of_dependents", nullable = false)
     private Integer numberOfDependents;
 
+    @Column(name = "revolving_utilization", nullable = false)
+    private Double revolvingUtilization;
+
+    @Column(name = "open_credit_lines", nullable = false)
+    private Integer openCreditLines;
+
+    @Column(name = "real_estate_loans", nullable = false)
+    private Integer realEstateLoans;
+
+    @Column(name = "late_payments_30_59_days", nullable = false)
+    private Integer latePayments30To59Days;
+
+    @Column(name = "late_payments_60_89_days", nullable = false)
+    private Integer latePayments60To89Days;
+
+    @Column(name = "late_payments_90_days_or_more", nullable = false)
+    private Integer latePayments90DaysOrMore;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ApplicationStatus status;
@@ -66,6 +85,7 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
             Integer numberOfDependents,
+            CreditHistory creditHistory,
             ApplicationStatus status,
             String createdBy,
             Instant deletedAt) {
@@ -78,6 +98,7 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
         this.employmentYears = employmentYears;
         this.existingMonthlyDebt = existingMonthlyDebt;
         this.numberOfDependents = numberOfDependents;
+        setCreditHistory(creditHistory);
         this.status = status;
         this.createdBy = createdBy;
         this.deletedAt = deletedAt;
@@ -119,6 +140,16 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
         return numberOfDependents;
     }
 
+    public CreditHistory getCreditHistory() {
+        return new CreditHistory(
+                revolvingUtilization,
+                openCreditLines,
+                realEstateLoans,
+                latePayments30To59Days,
+                latePayments60To89Days,
+                latePayments90DaysOrMore);
+    }
+
     public ApplicationStatus getStatus() {
         return status;
     }
@@ -141,6 +172,7 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
             Integer numberOfDependents,
+            CreditHistory creditHistory,
             ApplicationStatus status,
             Instant deletedAt) {
         this.applicantFullName = applicantFullName;
@@ -152,7 +184,17 @@ public class CreditApplicationJpaEntity extends BaseJpaAuditEntity {
         this.employmentYears = employmentYears;
         this.existingMonthlyDebt = existingMonthlyDebt;
         this.numberOfDependents = numberOfDependents;
+        setCreditHistory(creditHistory);
         this.status = status;
         this.deletedAt = deletedAt;
+    }
+
+    private void setCreditHistory(CreditHistory creditHistory) {
+        this.revolvingUtilization = creditHistory.revolvingUtilization();
+        this.openCreditLines = creditHistory.openCreditLines();
+        this.realEstateLoans = creditHistory.realEstateLoans();
+        this.latePayments30To59Days = creditHistory.latePayments30To59Days();
+        this.latePayments60To89Days = creditHistory.latePayments60To89Days();
+        this.latePayments90DaysOrMore = creditHistory.latePayments90DaysOrMore();
     }
 }

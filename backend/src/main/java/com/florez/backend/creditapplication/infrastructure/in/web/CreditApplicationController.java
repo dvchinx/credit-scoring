@@ -91,6 +91,7 @@ public class CreditApplicationController {
                 request.employmentYears(),
                 request.existingMonthlyDebt(),
                 request.numberOfDependents(),
+                request.creditHistory().toDomain(),
                 createdBy);
     }
 }

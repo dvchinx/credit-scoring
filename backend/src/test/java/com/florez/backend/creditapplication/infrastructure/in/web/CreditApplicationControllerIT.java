@@ -52,7 +52,8 @@ class CreditApplicationControllerIT {
                 48,
                 6.5,
                 new BigDecimal("400.00"),
-                0);
+                0,
+                new CreditHistoryPayload(0.25, 4, 1, 0, 0, 0));
     }
 
     @Test
@@ -97,6 +98,20 @@ class CreditApplicationControllerIT {
     }
 
     @Test
+    void create_sinHistorialCrediticio_devuelve400() throws Exception {
+        CreditApplicationPayload withoutHistory = new CreditApplicationPayload(
+                "Alice Wonderland", "CTRL-DOC-NOHIST", LocalDate.of(1992, 3, 15), new BigDecimal("5000.00"),
+                new BigDecimal("20000.00"), 48, 6.5, new BigDecimal("400.00"), 0, null);
+
+        mockMvc.perform(post("/credit-applications")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(withoutHistory)))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(400))
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).contains("creditHistory"));
+    }
+
+    @Test
     void create_conDocumentIdDuplicado_devuelve409() throws Exception {
         String body = objectMapper.writeValueAsString(samplePayload("CTRL-DOC-DUP"));
 
@@ -124,6 +139,16 @@ class CreditApplicationControllerIT {
             Integer loanTermMonths,
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
-            Integer numberOfDependents) {
+            Integer numberOfDependents,
+            CreditHistoryPayload creditHistory) {
+    }
+
+    private record CreditHistoryPayload(
+            Double revolvingUtilization,
+            Integer openCreditLines,
+            Integer realEstateLoans,
+            Integer latePayments30To59Days,
+            Integer latePayments60To89Days,
+            Integer latePayments90DaysOrMore) {
     }
 }

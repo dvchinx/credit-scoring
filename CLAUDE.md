@@ -26,16 +26,22 @@ Este es un proyecto de portafolio orientado a roles **Backend + IA**. El objetiv
   - `/what-if` → recalcula el score simulando cambios en variables de entrada
   - Modelo: XGBoost o Logistic Regression (priorizar interpretabilidad sobre performance marginal)
 - **Versionado de modelos:** cada modelo entrenado se registra con metadata (fecha, dataset, métricas, hash) — puede ser tan simple como una tabla `model_versions` + artefactos en disco/S3 local (MinIO).
+- **Frontend:** React + TypeScript (Vite) como SPA separada en `frontend/`
+  - React Router (navegación), TanStack Query (estado del servidor / llamadas al API)
+  - Recharts para visualizar explicaciones SHAP
+  - Vitest + Testing Library para tests
 - **Contenedores:** Docker + docker-compose
 - **Testing:** JUnit 5 + Mockito, Testcontainers para tests de integración con Postgres real
 - **Observabilidad:** Spring Actuator + Micrometer, logs estructurados (JSON)
 
 > Nota: al igual que en el caso de fraude, el modelo de ML vive en un microservicio Python separado del backend Java. El backend Java es responsable de la orquestación, persistencia y governance; el servicio Python es responsable exclusivamente de scoring y explicabilidad.
+>
+> El frontend es una **capa de presentación delgada** para demostrar el sistema: el foco del proyecto sigue siendo backend + IA. Solo habla con el API de Spring Boot (nunca con el servicio de ML) y no contiene reglas de negocio.
 
 ## Arquitectura (alto nivel)
 
 ```
-[Cliente/API Gateway]
+[Frontend (React SPA)] / [Clientes API]
         │
         ▼
 [Spring Boot API] ──► [PostgreSQL] (solicitudes, decisiones, auditoría, versiones de modelo)
@@ -67,6 +73,14 @@ Flujo de una solicitud de crédito:
 - Versión de modelo usada en cada decisión debe quedar registrada explícitamente (nunca inferida después del hecho).
 - Reglas regulatorias/umbrales externalizados (config o tabla en BD), no hardcodeados.
 
+### Frontend
+
+- Código en `frontend/`, organizado por **feature** (`features/auth`, `features/credit-applications`, `features/decisions`, `features/what-if`, `features/models`, `features/audit`), con un cliente HTTP tipado compartido.
+- Los tipos TypeScript reflejan los DTOs del API (records de `infrastructure/in/web`); si cambia un DTO, se actualiza su tipo en el mismo cambio.
+- El frontend **muestra** lo que el backend decidió: no recalcula decisiones, scores ni umbrales. La simulación what-if se pide al backend.
+- La URL del API se configura por variable de entorno (`VITE_API_BASE_URL`), nunca hardcodeada.
+- El JWT se guarda en memoria (no en `localStorage`) para reducir la exposición ante XSS; si se decide persistirlo, documentar el trade-off.
+
 ## Fases del proyecto (roadmap sugerido)
 
 1. **Fase 1 — Esqueleto backend:** CRUD de solicitudes de crédito, autenticación JWT, persistencia en Postgres.
@@ -74,7 +88,17 @@ Flujo de una solicitud de crédito:
 3. **Fase 3 — Explicabilidad:** integrar SHAP, exponer `/explain`, persistir explicación junto a cada decisión.
 4. **Fase 4 — Model registry y versionado:** registrar metadata de cada modelo entrenado, permitir "activar" una versión específica, asociar cada decisión histórica a su versión.
 5. **Fase 5 — What-if analysis:** endpoint de simulación, útil tanto para el solicitante ("qué mejorar") como para auditoría interna.
-6. **Fase 6 — Pulido:** tests de integración con Testcontainers, documentación, dashboard simple de auditoría (decisiones + explicaciones), README con diagramas.
+6. **Fase 6 — Frontend:** SPA en React + TypeScript que consume el API de Spring Boot:
+   - Login con JWT y manejo de sesión expirada (401 → volver al login).
+   - Solicitudes: listado paginado, alta y edición (incluido el bloque `creditHistory`), con los errores de validación del backend mostrados por campo.
+   - Detalle de solicitud: estado actual + historial de decisiones (incluidos los intentos `FAILED` y su motivo).
+   - Vista de decisión: resultado, probabilidad de default y score, motivos de la política, versión de modelo y gráfico de contribuciones SHAP (qué variables subieron o bajaron el riesgo).
+   - Simulador what-if: modificar variables y comparar la decisión simulada con la real.
+   - Versiones de modelo (solo `ADMIN`): listado con métricas y versión activa.
+   - Dashboard de auditoría: decisiones por resultado y por versión de modelo, intentos fallidos.
+   - Backend: CORS configurable por variable de entorno, sin cambios en la lógica de dominio.
+   - Tests con Vitest + Testing Library y servicio `frontend` en docker-compose (build estático servido por nginx).
+7. **Fase 7 — Pulido:** tests de integración con Testcontainers, documentación, README con diagramas.
 
 **Empezar por la Fase 1.** No avanzar al servicio de ML sin tener el backend base sólido y testeado.
 
@@ -85,6 +109,7 @@ Flujo de una solicitud de crédito:
 - No sobreescribir versiones de modelo — cada entrenamiento genera una versión nueva e inmutable.
 - No hardcodear credenciales ni umbrales regulatorios — usar variables de entorno / configuración externalizada.
 - No optimizar performance del modelo por encima de la interpretabilidad sin justificarlo explícitamente.
+- No replicar reglas de negocio (umbrales, lógica de decisión) en el frontend ni llamar al servicio de ML desde el navegador.
 
 ## Comandos útiles
 
@@ -92,6 +117,8 @@ Flujo de una solicitud de crédito:
 docker-compose up -d          # levanta Postgres y servicios auxiliares
 ./mvnw spring-boot:run         # corre el backend
 ./mvnw test                    # corre tests
+cd frontend && npm run dev     # corre el frontend (Fase 6)
+cd frontend && npm test        # tests del frontend (Fase 6)
 ```
 
 (Actualizar esta sección a medida que se agreguen scripts reales del proyecto.)

@@ -19,6 +19,7 @@ final class CreditApplicationMapper {
                 entity.getEmploymentYears(),
                 entity.getExistingMonthlyDebt(),
                 entity.getNumberOfDependents(),
+                entity.getCreditHistory(),
                 entity.getStatus(),
                 entity.getCreatedBy(),
                 entity.getCreatedAt(),
@@ -37,6 +38,7 @@ final class CreditApplicationMapper {
                 application.getEmploymentYears(),
                 application.getExistingMonthlyDebt(),
                 application.getNumberOfDependents(),
+                application.getCreditHistory(),
                 application.getStatus(),
                 application.getCreatedBy(),
                 application.getDeletedAt());
@@ -53,6 +55,7 @@ final class CreditApplicationMapper {
                 application.getEmploymentYears(),
                 application.getExistingMonthlyDebt(),
                 application.getNumberOfDependents(),
+                application.getCreditHistory(),
                 application.getStatus(),
                 application.getDeletedAt());
     }

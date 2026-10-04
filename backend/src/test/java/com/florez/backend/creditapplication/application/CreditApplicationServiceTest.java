@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.florez.backend.common.domain.DuplicateResourceException;
 import com.florez.backend.common.domain.ResourceNotFoundException;
 import com.florez.backend.creditapplication.domain.model.CreditApplication;
+import com.florez.backend.creditapplication.domain.model.CreditHistory;
 import com.florez.backend.creditapplication.domain.port.out.CreditApplicationRepositoryPort;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -46,6 +47,7 @@ class CreditApplicationServiceTest {
                 5.0,
                 new BigDecimal("500.00"),
                 1,
+                new CreditHistory(0.25, 4, 1, 0, 0, 0),
                 "analyst1");
     }
 

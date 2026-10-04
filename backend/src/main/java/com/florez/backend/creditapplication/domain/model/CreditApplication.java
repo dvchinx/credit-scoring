@@ -17,6 +17,7 @@ public final class CreditApplication {
     private Double employmentYears;
     private BigDecimal existingMonthlyDebt;
     private Integer numberOfDependents;
+    private CreditHistory creditHistory;
     private ApplicationStatus status;
     private final String createdBy;
     private final Instant createdAt;
@@ -34,6 +35,7 @@ public final class CreditApplication {
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
             Integer numberOfDependents,
+            CreditHistory creditHistory,
             ApplicationStatus status,
             String createdBy,
             Instant createdAt,
@@ -49,6 +51,7 @@ public final class CreditApplication {
         this.employmentYears = employmentYears;
         this.existingMonthlyDebt = existingMonthlyDebt;
         this.numberOfDependents = numberOfDependents;
+        this.creditHistory = creditHistory;
         this.status = status;
         this.createdBy = createdBy;
         this.createdAt = createdAt;
@@ -66,6 +69,7 @@ public final class CreditApplication {
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
             Integer numberOfDependents,
+            CreditHistory creditHistory,
             String createdBy) {
         return new CreditApplication(
                 null,
@@ -78,6 +82,7 @@ public final class CreditApplication {
                 employmentYears,
                 existingMonthlyDebt,
                 numberOfDependents,
+                creditHistory,
                 ApplicationStatus.PENDING,
                 createdBy,
                 null,
@@ -96,6 +101,7 @@ public final class CreditApplication {
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
             Integer numberOfDependents,
+            CreditHistory creditHistory,
             ApplicationStatus status,
             String createdBy,
             Instant createdAt,
@@ -112,6 +118,7 @@ public final class CreditApplication {
                 employmentYears,
                 existingMonthlyDebt,
                 numberOfDependents,
+                creditHistory,
                 status,
                 createdBy,
                 createdAt,
@@ -128,7 +135,8 @@ public final class CreditApplication {
             Integer loanTermMonths,
             Double employmentYears,
             BigDecimal existingMonthlyDebt,
-            Integer numberOfDependents) {
+            Integer numberOfDependents,
+            CreditHistory creditHistory) {
         this.applicantFullName = applicantFullName;
         this.documentId = documentId;
         this.birthDate = birthDate;
@@ -138,6 +146,18 @@ public final class CreditApplication {
         this.employmentYears = employmentYears;
         this.existingMonthlyDebt = existingMonthlyDebt;
         this.numberOfDependents = numberOfDependents;
+        this.creditHistory = creditHistory;
+    }
+
+    /**
+     * Refleja en la solicitud el resultado de su última evaluación. El detalle completo
+     * (score, explicación, versión de modelo) vive en la decisión, no aquí.
+     */
+    public void recordDecisionOutcome(ApplicationStatus outcome) {
+        if (outcome == ApplicationStatus.PENDING || outcome == ApplicationStatus.IN_REVIEW) {
+            throw new IllegalArgumentException("Un resultado de decisión no puede ser " + outcome);
+        }
+        this.status = outcome;
     }
 
     public void softDelete() {
@@ -186,6 +206,10 @@ public final class CreditApplication {
 
     public Integer getNumberOfDependents() {
         return numberOfDependents;
+    }
+
+    public CreditHistory getCreditHistory() {
+        return creditHistory;
     }
 
     public ApplicationStatus getStatus() {

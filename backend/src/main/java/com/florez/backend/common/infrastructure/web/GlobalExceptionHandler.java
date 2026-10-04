@@ -4,6 +4,7 @@ import com.florez.backend.common.domain.DuplicateResourceException;
 import com.florez.backend.common.domain.InvalidCredentialsException;
 import com.florez.backend.common.domain.InvalidTokenException;
 import com.florez.backend.common.domain.ResourceNotFoundException;
+import com.florez.backend.common.domain.ServiceUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import org.slf4j.Logger;
@@ -37,6 +38,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidTokenException.class)
     public ResponseEntity<ErrorResponse> handleInvalidToken(InvalidTokenException ex, HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ErrorResponse> handleServiceUnavailable(ServiceUnavailableException ex, HttpServletRequest request) {
+        log.warn("Dependencia no disponible procesando {}: {}", request.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

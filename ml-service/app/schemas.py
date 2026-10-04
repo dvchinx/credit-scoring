@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -22,3 +24,21 @@ class ScoreResponse(BaseModel):
     probability_of_default: float
     risk_score: int
     model_version: str
+
+
+class FeatureContributionResponse(BaseModel):
+    feature: str
+    value: float = Field(..., description="Valor de entrada de la feature, tal como llegó en la solicitud")
+    shap_value: float = Field(..., description="Contribución al log-odds de default (positivo = más riesgo)")
+    direction: Literal["increases_risk", "decreases_risk", "neutral"]
+
+
+class ExplainResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_version: str
+    base_value: float = Field(..., description="Log-odds de default esperado sobre los datos de entrenamiento")
+    output_value: float = Field(..., description="Log-odds de default de esta solicitud: base_value + Σ shap_value")
+    contributions: list[FeatureContributionResponse] = Field(
+        ..., description="Contribución de cada feature, ordenadas por magnitud descendente"
+    )

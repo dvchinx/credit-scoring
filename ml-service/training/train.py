@@ -18,14 +18,17 @@ from sklearn.model_selection import train_test_split
 from training.preprocessing import TARGET_COLUMN, build_pipeline, raw_dataframe_to_features
 
 
-def train_and_save(df: pd.DataFrame, output_dir: Path) -> dict:
-    """Entrena el pipeline, lo evalúa y persiste una nueva versión inmutable en output_dir/<version>/."""
+def split_train_test(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    """Split determinista (X_train, X_test, y_train, y_test). El set de entrenamiento es también
+    el background implícito de las explicaciones SHAP (ver app.model.explain)."""
     X = raw_dataframe_to_features(df)
     y = df[TARGET_COLUMN]
+    return train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+
+def train_and_save(df: pd.DataFrame, output_dir: Path) -> dict:
+    """Entrena el pipeline, lo evalúa y persiste una nueva versión inmutable en output_dir/<version>/."""
+    X_train, X_test, y_train, y_test = split_train_test(df)
 
     pipeline = build_pipeline()
     pipeline.fit(X_train, y_train)
@@ -45,7 +48,7 @@ def train_and_save(df: pd.DataFrame, output_dir: Path) -> dict:
         "training_rows": len(X_train),
         "test_rows": len(X_test),
         "metrics": {"roc_auc": auc},
-        "feature_names": list(X.columns),
+        "feature_names": list(X_train.columns),
     }
     (version_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
 

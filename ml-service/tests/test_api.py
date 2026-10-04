@@ -1,3 +1,7 @@
+import math
+
+import pytest
+
 SAMPLE_REQUEST = {
     "revolving_utilization_of_unsecured_lines": 0.3,
     "age": 45,
@@ -61,5 +65,41 @@ def test_score_rejects_negative_values(client):
 
 def test_score_returns_503_when_model_not_loaded(empty_artifacts_client):
     response = empty_artifacts_client.post("/score", json=SAMPLE_REQUEST)
+
+    assert response.status_code == 503
+
+
+def test_explain_returns_one_contribution_per_feature_sorted_by_magnitude(client):
+    response = client.post("/explain", json=SAMPLE_REQUEST)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_version"]
+    contributions = body["contributions"]
+    assert {c["feature"] for c in contributions} == set(SAMPLE_REQUEST)
+    magnitudes = [abs(c["shap_value"]) for c in contributions]
+    assert magnitudes == sorted(magnitudes, reverse=True)
+
+
+def test_explain_contributions_add_up_to_the_scored_probability(client):
+    explanation = client.post("/explain", json=SAMPLE_REQUEST).json()
+    scored = client.post("/score", json=SAMPLE_REQUEST).json()
+
+    total_shap = sum(c["shap_value"] for c in explanation["contributions"])
+    assert explanation["output_value"] == pytest.approx(explanation["base_value"] + total_shap)
+    assert 1 / (1 + math.exp(-explanation["output_value"])) == pytest.approx(scored["probability_of_default"])
+    assert explanation["model_version"] == scored["model_version"]
+
+
+def test_explain_direction_matches_shap_sign(client):
+    contributions = client.post("/explain", json=SAMPLE_REQUEST).json()["contributions"]
+
+    for contribution in contributions:
+        expected = "increases_risk" if contribution["shap_value"] > 0 else "decreases_risk"
+        assert contribution["direction"] == expected
+
+
+def test_explain_returns_503_when_model_not_loaded(empty_artifacts_client):
+    response = empty_artifacts_client.post("/explain", json=SAMPLE_REQUEST)
 
     assert response.status_code == 503

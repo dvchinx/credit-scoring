@@ -1,12 +1,13 @@
 # ML Service — Credit Scoring
 
-Microservicio Python (FastAPI) que entrena y expone el modelo de riesgo crediticio. Vive separado del backend Java: es responsable únicamente de scoring, no de persistencia ni orquestación (ver `CLAUDE.md` en la raíz del repo).
+Microservicio Python (FastAPI) que entrena y expone el modelo de riesgo crediticio. Vive separado del backend Java: es responsable únicamente de scoring y explicabilidad, no de persistencia ni orquestación (ver `CLAUDE.md` en la raíz del repo).
 
 ## Modelo
 
 - **Dataset:** [Give Me Some Credit](https://www.kaggle.com/c/GiveMeSomeCredit/data) (Kaggle) — ~150k solicitudes históricas con 10 variables numéricas y la etiqueta `SeriousDlqin2yrs` (impago serio en los siguientes 2 años).
 - **Algoritmo:** Regresión logística (`scikit-learn`), con imputación de medianas + escalado dentro de un `Pipeline`, priorizando interpretabilidad sobre performance marginal (ver `CLAUDE.md`).
 - **Salida:** probabilidad de default + score de riesgo en escala 300–850 (estilo FICO: a mayor score, menor riesgo).
+- **Explicabilidad:** valores SHAP por variable (ver [Explicabilidad](#explicabilidad)).
 - **Versionado:** cada entrenamiento genera una carpeta inmutable `models/<timestamp>/` (`model.joblib` + `metadata.json`) y actualiza el puntero `models/ACTIVE_VERSION`. Es una versión mínima de model registry — la Fase 4 del roadmap lo formalizará en base de datos.
 
 ## Setup local
@@ -42,6 +43,7 @@ Si `models/ACTIVE_VERSION` no existe todavía (no se entrenó ningún modelo), e
 |---|---|---|
 | GET | `/health` | Estado del servicio y versión del modelo activo |
 | POST | `/score` | Probabilidad de default + score de riesgo para las 10 variables del modelo |
+| POST | `/explain` | Valores SHAP por variable para la misma entrada que `/score` |
 
 ### Ejemplo
 
@@ -61,6 +63,28 @@ curl -X POST http://localhost:8000/score \
         "number_of_dependents": 1
       }'
 ```
+
+Para obtener la explicación, enviar el mismo payload a `/explain`:
+
+```json
+{
+  "model_version": "20261004T120000Z",
+  "base_value": -0.41,
+  "output_value": -1.52,
+  "contributions": [
+    {"feature": "age", "value": 45, "shap_value": -0.62, "direction": "decreases_risk"},
+    {"feature": "revolving_utilization_of_unsecured_lines", "value": 0.3, "shap_value": -0.31, "direction": "decreases_risk"}
+  ]
+}
+```
+
+## Explicabilidad
+
+`/explain` devuelve el valor SHAP de cada variable en espacio **log-odds de default**: positivo aumenta el riesgo, negativo lo reduce. Se cumple `base_value + Σ shap_value = output_value`, y `sigmoid(output_value)` es la `probability_of_default` de `/score`.
+
+Para una regresión logística sobre variables estandarizadas, el SHAP exacto (con features independientes y el set de entrenamiento como background) tiene forma cerrada: `φᵢ = βᵢ · zᵢ`, porque la media de cada variable estandarizada en entrenamiento es 0. El servicio lo calcula así en `app/model.py`, sin cargar la librería `shap` (ni numba) en la imagen de producción. `tests/test_explainability.py` verifica que el resultado coincide con `shap.LinearExplainer` (tolerancia 1e-9); `shap` solo es dependencia de desarrollo.
+
+Si en el futuro se cambia a un modelo no lineal (p. ej. XGBoost), habrá que pasar a `shap.TreeExplainer` y llevar `shap` a las dependencias de runtime.
 
 ## Tests
 
@@ -82,4 +106,4 @@ El contenedor monta `./ml-service/models` y `./ml-service/data`, así que el ent
 
 ## Nota sobre integración con el backend
 
-El mapeo entre los campos de `CreditApplicationRequest` (Java) y las variables nativas de este dataset (historial de mora, líneas de crédito abiertas, etc.) es responsabilidad de la orquestación del backend y se resuelve en una fase posterior. Este servicio expone el modelo con el esquema de entrenamiento original para mantener trazabilidad total entre lo que el modelo aprendió y lo que expone — nada de "traducciones" implícitas que compliquen la auditoría.
+El mapeo entre la solicitud de crédito (Java) y las variables nativas de este dataset es responsabilidad del backend (`ModelFeatures.from(...)`, ver la tabla en el README raíz). Este servicio expone el modelo con el esquema de entrenamiento original para mantener trazabilidad total entre lo que el modelo aprendió y lo que expone — nada de "traducciones" implícitas que compliquen la auditoría. El backend guarda con cada decisión el payload exacto que envió, con estos mismos nombres de variable.

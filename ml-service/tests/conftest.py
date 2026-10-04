@@ -33,8 +33,13 @@ def _synthetic_training_frame(rows: int = 200) -> pd.DataFrame:
 
 
 @pytest.fixture
-def trained_artifacts_dir(tmp_path):
-    train_and_save(_synthetic_training_frame(), tmp_path)
+def synthetic_training_frame() -> pd.DataFrame:
+    return _synthetic_training_frame()
+
+
+@pytest.fixture
+def trained_artifacts_dir(tmp_path, synthetic_training_frame):
+    train_and_save(synthetic_training_frame, tmp_path)
     return tmp_path
 
 

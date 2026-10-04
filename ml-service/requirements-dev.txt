@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8.2
+# Solo para tests: valida que la explicación en forma cerrada coincide con shap.LinearExplainer
+shap>=0.46
 httpx>=0.27

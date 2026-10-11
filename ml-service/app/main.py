@@ -1,14 +1,26 @@
-"""Servicio FastAPI que expone el modelo de riesgo crediticio."""
+"""Servicio FastAPI que expone los modelos de riesgo crediticio entrenados."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 
 from app.config import get_settings
-from app.model import LoadedModel, ModelNotFoundError, explain, load_model, score
-from app.schemas import ExplainResponse, FeatureContributionResponse, ScoreRequest, ScoreResponse
+from app.model import explain, score
+from app.registry import VERSION_PATTERN, LoadedModel, ModelIntegrityError, ModelNotFoundError, ModelRegistry
+from app.schemas import (
+    ExplainResponse,
+    FeatureContributionResponse,
+    ModelVersionInfo,
+    ScoreRequest,
+    ScoreResponse,
+)
+
+ModelVersionParam = Annotated[
+    str,
+    Query(pattern=VERSION_PATTERN, description="Versión exacta del modelo a usar (la elige el backend)"),
+]
 
 
 def _direction(shap_value: float) -> str:
@@ -20,38 +32,50 @@ def _direction(shap_value: float) -> str:
 
 
 def create_app(artifacts_dir: Path | None = None) -> FastAPI:
-    resolved_artifacts_dir = artifacts_dir or get_settings().artifacts_dir
-    state: dict[str, LoadedModel | None] = {"model": None}
+    registry = ModelRegistry(artifacts_dir or get_settings().artifacts_dir)
+    fastapi_app = FastAPI(title="Credit Scoring ML Service", version="0.3.0")
 
-    @asynccontextmanager
-    async def lifespan(_: FastAPI):
+    def load(version: str) -> LoadedModel:
         try:
-            state["model"] = load_model(resolved_artifacts_dir)
-        except ModelNotFoundError:
-            state["model"] = None
-        yield
-        state.clear()
+            return registry.load(version)
+        except ModelNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ModelIntegrityError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
-    fastapi_app = FastAPI(title="Credit Scoring ML Service", version="0.2.0", lifespan=lifespan)
-
-    def require_model() -> LoadedModel:
-        loaded = state.get("model")
-        if loaded is None:
-            raise HTTPException(status_code=503, detail="El modelo de scoring no está disponible todavía.")
-        return loaded
+    def describe(version: str) -> ModelVersionInfo:
+        try:
+            metadata = registry.describe(version)
+        except ModelNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return ModelVersionInfo(
+            version=version,
+            trained_at=metadata.get("trained_at"),
+            algorithm=metadata.get("algorithm"),
+            hyperparameters=metadata.get("hyperparameters") or {},
+            dataset=metadata.get("dataset"),
+            metrics=metadata.get("metrics") or {},
+            feature_names=metadata.get("feature_names") or [],
+            artifact_sha256=(metadata.get("artifact") or {}).get("sha256"),
+            artifact_verified=metadata["artifact_verified"],
+        )
 
     @fastapi_app.get("/health")
     def health() -> dict:
-        loaded = state.get("model")
-        return {
-            "status": "ok" if loaded else "degraded",
-            "model_loaded": loaded is not None,
-            "model_version": loaded.version if loaded else None,
-        }
+        versions = registry.list_versions()
+        return {"status": "ok" if versions else "degraded", "available_versions": len(versions)}
+
+    @fastapi_app.get("/models", response_model=list[ModelVersionInfo])
+    def list_models() -> list[ModelVersionInfo]:
+        return [describe(version) for version in registry.list_versions()]
+
+    @fastapi_app.get("/models/{version}", response_model=ModelVersionInfo)
+    def get_model(version: str) -> ModelVersionInfo:
+        return describe(version)
 
     @fastapi_app.post("/score", response_model=ScoreResponse)
-    def score_application(request: ScoreRequest) -> ScoreResponse:
-        loaded = require_model()
+    def score_application(request: ScoreRequest, model_version: ModelVersionParam) -> ScoreResponse:
+        loaded = load(model_version)
         probability_of_default, risk_score = score(loaded, request)
         return ScoreResponse(
             probability_of_default=probability_of_default,
@@ -60,8 +84,8 @@ def create_app(artifacts_dir: Path | None = None) -> FastAPI:
         )
 
     @fastapi_app.post("/explain", response_model=ExplainResponse)
-    def explain_application(request: ScoreRequest) -> ExplainResponse:
-        loaded = require_model()
+    def explain_application(request: ScoreRequest, model_version: ModelVersionParam) -> ExplainResponse:
+        loaded = load(model_version)
         explanation = explain(loaded, request)
         return ExplainResponse(
             model_version=loaded.version,

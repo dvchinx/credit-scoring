@@ -42,3 +42,28 @@ class ExplainResponse(BaseModel):
     contributions: list[FeatureContributionResponse] = Field(
         ..., description="Contribución de cada feature, ordenadas por magnitud descendente"
     )
+
+
+class DatasetInfo(BaseModel):
+    source: str | None = None
+    sha256: str | None = None
+    training_rows: int | None = None
+    test_rows: int | None = None
+    default_rate: float | None = None
+
+
+class ModelVersionInfo(BaseModel):
+    """Metadata de una versión entrenada. Los campos opcionales pueden faltar en versiones
+    entrenadas antes de la Fase 4; el backend se niega a registrar versiones incompletas."""
+
+    version: str
+    trained_at: str | None = None
+    algorithm: str | None = None
+    hyperparameters: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    dataset: DatasetInfo | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
+    feature_names: list[str] = Field(default_factory=list)
+    artifact_sha256: str | None = None
+    artifact_verified: bool = Field(
+        ..., description="El artefacto en disco coincide con el hash registrado al entrenar"
+    )

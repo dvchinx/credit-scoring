@@ -38,9 +38,19 @@ def synthetic_training_frame() -> pd.DataFrame:
 
 
 @pytest.fixture
-def trained_artifacts_dir(tmp_path, synthetic_training_frame):
-    train_and_save(synthetic_training_frame, tmp_path)
+def trained_model(tmp_path, synthetic_training_frame) -> dict:
+    """Metadata de una versión entrenada en tmp_path (incluye la clave "version")."""
+    return train_and_save(synthetic_training_frame, tmp_path, dataset_source="synthetic")
+
+
+@pytest.fixture
+def trained_artifacts_dir(tmp_path, trained_model):
     return tmp_path
+
+
+@pytest.fixture
+def trained_version(trained_model) -> str:
+    return trained_model["version"]
 
 
 @pytest.fixture

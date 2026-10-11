@@ -8,7 +8,7 @@ Microservicio Python (FastAPI) que entrena y expone el modelo de riesgo creditic
 - **Algoritmo:** Regresión logística (`scikit-learn`), con imputación de medianas + escalado dentro de un `Pipeline`, priorizando interpretabilidad sobre performance marginal (ver `CLAUDE.md`).
 - **Salida:** probabilidad de default + score de riesgo en escala 300–850 (estilo FICO: a mayor score, menor riesgo).
 - **Explicabilidad:** valores SHAP por variable (ver [Explicabilidad](#explicabilidad)).
-- **Versionado:** cada entrenamiento genera una carpeta inmutable `models/<timestamp>/` (`model.joblib` + `metadata.json`) y actualiza el puntero `models/ACTIVE_VERSION`. Es una versión mínima de model registry — la Fase 4 del roadmap lo formalizará en base de datos.
+- **Versionado:** cada entrenamiento genera una carpeta inmutable `models/<timestamp>/` (`model.joblib` + `metadata.json`) y falla si la carpeta ya existe: una versión nunca se sobreescribe. Entrenar **no activa** nada: qué versión decide lo gobierna el model registry del backend (ver README raíz), y este servicio sirve la versión exacta que se le pide.
 
 ## Setup local
 
@@ -27,7 +27,15 @@ pip install -r requirements-dev.txt
 python -m training.train
 ```
 
-Esto entrena el pipeline, evalúa AUC-ROC sobre un holdout del 20% y persiste la nueva versión activa en `models/`.
+Esto entrena el pipeline, lo evalúa sobre un holdout del 20% y persiste una versión nueva en `models/<version>/`. `metadata.json` incluye:
+
+- algoritmo e hiperparámetros del clasificador,
+- `dataset`: origen, SHA-256 del contenido, filas de entrenamiento/test y tasa de default,
+- `metrics`: ROC-AUC y Brier score sobre el holdout,
+- `feature_names`: variables de entrada en orden de entrenamiento,
+- `artifact.sha256`: hash de `model.joblib`, que el servicio verifica antes de cargarlo.
+
+Después hay que registrar y activar la versión desde el backend (`POST /model-versions` y `POST /model-activations`).
 
 ## Levantar la API
 
@@ -35,20 +43,24 @@ Esto entrena el pipeline, evalúa AUC-ROC sobre un holdout del 20% y persiste la
 uvicorn app.main:app --reload --port 8000
 ```
 
-Si `models/ACTIVE_VERSION` no existe todavía (no se entrenó ningún modelo), el servicio arranca igual pero `/health` reporta `degraded` y `/score` responde `503`.
+Si todavía no hay ninguna versión entrenada, el servicio arranca igual pero `/health` reporta `degraded`. Los modelos se cargan bajo demanda (la primera vez que se pide cada versión) y quedan en caché.
 
 ## Endpoints
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/health` | Estado del servicio y versión del modelo activo |
-| POST | `/score` | Probabilidad de default + score de riesgo para las 10 variables del modelo |
-| POST | `/explain` | Valores SHAP por variable para la misma entrada que `/score` |
+| GET | `/health` | Estado del servicio y número de versiones disponibles |
+| GET | `/models` | Versiones disponibles en disco, con su metadata y si el artefacto pasa la verificación de hash |
+| GET | `/models/{version}` | Metadata de una versión (`404` si no existe) |
+| POST | `/score?model_version=<v>` | Probabilidad de default + score de riesgo para las 10 variables del modelo |
+| POST | `/explain?model_version=<v>` | Valores SHAP por variable para la misma entrada que `/score` |
+
+`model_version` es obligatorio (`422` si falta o tiene un formato inválido). Respuestas de error: `404` si la versión no existe y `409` si su `model.joblib` no coincide con el hash registrado al entrenar.
 
 ### Ejemplo
 
 ```bash
-curl -X POST http://localhost:8000/score \
+curl -X POST "http://localhost:8000/score?model_version=20261004T120000Z" \
   -H "Content-Type: application/json" \
   -d '{
         "revolving_utilization_of_unsecured_lines": 0.3,

@@ -139,3 +139,48 @@ def test_explain_unknown_version_returns_404(empty_artifacts_client):
     )
 
     assert response.status_code == 404
+
+
+def test_what_if_evaluates_both_scenarios_like_score_and_explain(client, trained_version):
+    params = {"model_version": trained_version}
+    scenario = dict(SAMPLE_REQUEST, revolving_utilization_of_unsecured_lines=0.9)
+
+    body = client.post("/what-if", params=params, json={"baseline": SAMPLE_REQUEST, "scenario": scenario}).json()
+
+    assert body["model_version"] == trained_version
+    for key, payload in (("baseline", SAMPLE_REQUEST), ("scenario", scenario)):
+        scored = client.post("/score", params=params, json=payload).json()
+        explained = client.post("/explain", params=params, json=payload).json()
+        assert body[key]["probability_of_default"] == pytest.approx(scored["probability_of_default"])
+        assert body[key]["risk_score"] == scored["risk_score"]
+        assert body[key]["contributions"] == explained["contributions"]
+
+
+def test_what_if_changing_one_feature_only_changes_its_own_contribution(client, trained_version):
+    """En un modelo lineal, el cambio de SHAP es atribuible exactamente a la variable modificada."""
+    scenario = dict(SAMPLE_REQUEST, revolving_utilization_of_unsecured_lines=0.9)
+
+    body = client.post(
+        "/what-if", params={"model_version": trained_version}, json={"baseline": SAMPLE_REQUEST, "scenario": scenario}
+    ).json()
+
+    baseline = {c["feature"]: c["shap_value"] for c in body["baseline"]["contributions"]}
+    simulated = {c["feature"]: c["shap_value"] for c in body["scenario"]["contributions"]}
+    changed = {feature for feature in baseline if simulated[feature] != pytest.approx(baseline[feature])}
+    assert changed == {"revolving_utilization_of_unsecured_lines"}
+    assert body["scenario"]["base_value"] == body["baseline"]["base_value"]
+
+
+def test_what_if_requires_both_scenarios(client, trained_version):
+    response = client.post("/what-if", params={"model_version": trained_version}, json={"baseline": SAMPLE_REQUEST})
+
+    assert response.status_code == 422
+
+
+def test_what_if_unknown_version_returns_404(client):
+    response = client.post(
+        "/what-if", params={"model_version": "20990101T000000Z"},
+        json={"baseline": SAMPLE_REQUEST, "scenario": SAMPLE_REQUEST},
+    )
+
+    assert response.status_code == 404

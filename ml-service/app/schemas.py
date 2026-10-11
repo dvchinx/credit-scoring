@@ -67,3 +67,26 @@ class ModelVersionInfo(BaseModel):
     artifact_verified: bool = Field(
         ..., description="El artefacto en disco coincide con el hash registrado al entrenar"
     )
+
+
+class WhatIfRequest(BaseModel):
+    baseline: ScoreRequest = Field(..., description="Variables tal como están en la solicitud")
+    scenario: ScoreRequest = Field(..., description="Variables con los cambios simulados")
+
+
+class EvaluationResponse(BaseModel):
+    probability_of_default: float
+    risk_score: int
+    base_value: float
+    output_value: float
+    contributions: list[FeatureContributionResponse]
+
+
+class WhatIfResponse(BaseModel):
+    """Ambos escenarios evaluados con el mismo modelo cargado: las diferencias se deben solo a la entrada."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_version: str
+    baseline: EvaluationResponse
+    scenario: EvaluationResponse

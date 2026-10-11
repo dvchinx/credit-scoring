@@ -54,6 +54,7 @@ Si todavía no hay ninguna versión entrenada, el servicio arranca igual pero `/
 | GET | `/models/{version}` | Metadata de una versión (`404` si no existe) |
 | POST | `/score?model_version=<v>` | Probabilidad de default + score de riesgo para las 10 variables del modelo |
 | POST | `/explain?model_version=<v>` | Valores SHAP por variable para la misma entrada que `/score` |
+| POST | `/what-if?model_version=<v>` | Recibe `{"baseline": {...}, "scenario": {...}}` (mismo esquema que `/score`) y devuelve score + SHAP de ambos, calculados con el mismo modelo cargado |
 
 `model_version` es obligatorio (`422` si falta o tiene un formato inválido). Respuestas de error: `404` si la versión no existe y `409` si su `model.joblib` no coincide con el hash registrado al entrenar.
 
@@ -95,6 +96,8 @@ Para obtener la explicación, enviar el mismo payload a `/explain`:
 `/explain` devuelve el valor SHAP de cada variable en espacio **log-odds de default**: positivo aumenta el riesgo, negativo lo reduce. Se cumple `base_value + Σ shap_value = output_value`, y `sigmoid(output_value)` es la `probability_of_default` de `/score`.
 
 Para una regresión logística sobre variables estandarizadas, el SHAP exacto (con features independientes y el set de entrenamiento como background) tiene forma cerrada: `φᵢ = βᵢ · zᵢ`, porque la media de cada variable estandarizada en entrenamiento es 0. El servicio lo calcula así en `app/model.py`, sin cargar la librería `shap` (ni numba) en la imagen de producción. `tests/test_explainability.py` verifica que el resultado coincide con `shap.LinearExplainer` (tolerancia 1e-9); `shap` solo es dependencia de desarrollo.
+
+En `/what-if`, como el modelo es lineal, cambiar una variable solo cambia su propia contribución SHAP: la diferencia entre escenarios se atribuye exactamente a las variables modificadas (lo verifica `tests/test_api.py`).
 
 Si en el futuro se cambia a un modelo no lineal (p. ej. XGBoost), habrá que pasar a `shap.TreeExplainer` y llevar `shap` a las dependencias de runtime.
 

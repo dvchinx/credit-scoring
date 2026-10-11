@@ -13,12 +13,14 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo qu
 
 - **Fase 5 — What-if analysis** completada: simulación de cambios en la solicitud con el modelo activo y la política vigente, comparada contra el escenario real y registrada para auditoría sin crear decisiones.
 
-El frontend llega en la fase siguiente — ver [Roadmap](#roadmap).
+- **Fase 6 — Frontend** completada: SPA en React + TypeScript (`frontend/`) con login, solicitudes, decisiones explicadas con gráfico SHAP, simulador what-if, versiones de modelo y dashboard de auditoría.
+
+Queda la fase de pulido — ver [Roadmap](#roadmap).
 
 ## Arquitectura
 
 ```
-[Frontend (React SPA)] / [Clientes API]                                  (fase 6)
+[Frontend (React SPA)] ✅ (fase 6) / [Clientes API]
         │
         ▼
 [Spring Boot API] ──► [PostgreSQL] (solicitudes, decisiones, auditoría, versiones de modelo)
@@ -127,6 +129,27 @@ Una política inválida (p. ej. umbral de aprobación ≥ umbral de rechazo) imp
 
 > El modelo se entrena con `class_weight="balanced"`, así que sus probabilidades no están calibradas a la tasa real de default (~7%). Los umbrales por defecto son ilustrativos y deben revisarse con cada versión del modelo.
 
+### Frontend (`frontend/`)
+
+SPA en React + TypeScript que consume **solo** el API de Spring Boot. Es una capa de presentación: muestra lo que decidió el backend y no recalcula decisiones, scores ni umbrales.
+
+| Pantalla | Qué muestra |
+|---|---|
+| Login | Inicio de sesión; si el JWT expira o el backend responde `401`, vuelve al login con aviso y recuerda la página |
+| Solicitudes | Listado paginado; alta y edición con el bloque `creditHistory`; los errores de validación del backend se muestran junto a cada campo |
+| Detalle | Datos de la solicitud, botón "Evaluar con el modelo activo", historial de decisiones (incluidos los intentos `FAILED` y su motivo) |
+| Decisión | Resultado, probabilidad de default, score, motivos de la política, versión de modelo y gráfico de contribuciones SHAP |
+| Simulador what-if | Solo se envían las variables cambiadas; compara la decisión real con la simulada y el efecto en cada variable del modelo |
+| Modelos (`ADMIN`) | Versiones registradas con métricas, hash del artefacto, versión activa e historial de activaciones |
+| Auditoría | Decisiones por resultado y por versión de modelo, intentos fallidos recientes, simulaciones que cambiaron el resultado |
+
+Decisiones de diseño:
+- **JWT solo en memoria** (no en `localStorage`), para reducir la exposición ante XSS. Contrapartida asumida: al recargar la página hay que iniciar sesión de nuevo.
+- **Roles:** el frontend oculta la sección de modelos a los `ANALYST` solo por usabilidad; quien autoriza es el backend (`403`).
+- **URL del API** por `VITE_API_BASE_URL`, incrustada en el build. El backend solo acepta peticiones de navegador desde los orígenes de `CORS_ALLOWED_ORIGINS`.
+- **Carga diferida:** las páginas con gráficos (Recharts) se cargan bajo demanda, así que login y listado no descargan la librería de gráficos.
+- Organizado por feature (`features/auth`, `credit-applications`, `decisions`, `what-if`, `models`, `audit`) con un cliente HTTP tipado (`src/api`) cuyos tipos reflejan los DTOs del backend.
+
 ### Backend: arquitectura hexagonal (ports & adapters)
 
 Cada feature (`auth`, `creditapplication`) se organiza en tres capas internas, en vez de capas técnicas genéricas a nivel raíz:
@@ -145,6 +168,7 @@ com.florez.backend
 │                            persistencia append-only de decisiones
 ├── modelregistry/           Versiones de modelo registradas, activaciones auditadas, catálogo del servicio de ML
 ├── whatif/                  Simulación de escenarios sobre una solicitud y su registro de auditoría
+├── audit/                   Resumen de solo lectura (agregados SQL) para el dashboard de auditoría
 └── common/                  Excepciones de dominio, manejo de errores centralizado, entidad base de auditoría JPA,
                              TransactionRunner (port para delimitar transacciones sin acoplar los casos de uso a Spring)
 ```
@@ -160,8 +184,9 @@ com.florez.backend
 - **Observabilidad:** Spring Actuator + logs estructurados en JSON (Logstash encoder)
 - **Testing:** JUnit 5 + Mockito (unitarios) y Testcontainers + Postgres real (integración)
 - **Servicio de ML:** Python + FastAPI (`ml-service/`), scikit-learn (Regresión Logística), SHAP, pytest — ver [ml-service/README.md](ml-service/README.md)
-- **Integración backend → ML:** `RestClient` de Spring con timeouts configurables; los fallos se registran como decisiones `FAILED`
-- **Infraestructura:** Docker Compose para Postgres y el servicio de ML
+- **Integración backend → ML:** `RestClient` de Spring sobre HTTP/1.1 con timeouts configurables; los fallos se registran como decisiones `FAILED`
+- **Frontend:** React 19 + TypeScript (Vite), React Router, TanStack Query, Recharts; Vitest + Testing Library
+- **Infraestructura:** Docker Compose para Postgres, el servicio de ML y el frontend (build estático servido por nginx)
 
 ## Cómo levantar el entorno
 
@@ -189,7 +214,24 @@ cd backend
 
 Al arrancar por primera vez (tabla `users` vacía), se crea automáticamente el usuario `ADMIN` inicial con las credenciales de `ADMIN_USERNAME` / `ADMIN_PASSWORD` definidas en `.env` — nunca hay credenciales hardcodeadas en el código.
 
-### 4. Probar la API
+### 4. Frontend
+
+```bash
+cd frontend
+cp .env.example .env          # VITE_API_BASE_URL=http://localhost:8080
+npm install
+npm run dev                   # http://localhost:5173
+```
+
+O con Docker, como build estático servido por nginx en http://localhost:3000 (ya incluido en `docker-compose up -d`):
+
+```bash
+docker-compose up -d --build frontend
+```
+
+Para entrar como `admin`, primero hay que registrar y activar una versión de modelo (paso 5) para poder evaluar solicitudes.
+
+### 5. Probar la API
 
 ```bash
 # Login
@@ -263,7 +305,7 @@ Los valores SHAP están en log-odds de default: `baseValue + Σ shapValue = outp
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
-| POST | `/auth/login` | público | Devuelve un JWT |
+| POST | `/auth/login` | público | Devuelve un JWT, junto con `username` y `role` |
 | POST | `/auth/users` | `ADMIN` | Crea un usuario analista/admin |
 | POST | `/credit-applications` | JWT | Crea una solicitud de crédito |
 | GET | `/credit-applications` | JWT | Lista solicitudes (paginado, excluye eliminadas) |
@@ -280,7 +322,10 @@ Los valores SHAP están en log-odds de default: `baseValue + Σ shapValue = outp
 | POST | `/model-activations` | `ADMIN` | Activa una versión registrada (`{"version", "reason"}`); también sirve para rollback |
 | GET | `/model-activations` | JWT | Historial de activaciones, de la más reciente a la más antigua |
 | GET | `/model-activations/current` | JWT | Activación vigente (`404` si no hay ninguna) |
+| GET | `/audit/summary` | JWT | Agregados para auditoría: decisiones por resultado y por versión de modelo, intentos fallidos recientes, simulaciones |
 | GET | `/actuator/health` | público | Estado del servicio |
+
+Los listados paginados responden `{"content": [...], "page": {"size", "number", "totalElements", "totalPages"}}`.
 
 ## Tests
 
@@ -288,6 +333,13 @@ Los valores SHAP están en log-odds de default: `baseValue + Σ shapValue = outp
 cd backend
 ./mvnw test      # unitarios (JUnit 5 + Mockito)
 ./mvnw verify     # unitarios + integración (Testcontainers levanta un Postgres efímero; requiere Docker)
+
+cd ../frontend
+npm test          # Vitest + Testing Library (fetch simulado; no necesita backend)
+npm run build     # typecheck + build de producción
+
+cd ../ml-service
+pytest
 ```
 
 ## Roadmap
@@ -297,7 +349,7 @@ cd backend
 3. ✅ **Fase 3 — Explicabilidad:** `/explain` con valores SHAP, decisiones explicadas y append-only en el backend.
 4. ✅ **Fase 4 — Model registry y versionado:** versiones inmutables con metadata completa y hash verificado, activación auditada con rollback, decisiones ligadas a su versión.
 5. ✅ **Fase 5 — What-if analysis:** simulación de cambios en la solicitud con la misma derivación y política que una decisión real, atribución por variable y registro auditable.
-6. **Fase 6 — Frontend:** SPA en React + TypeScript (Vite) sobre el API de Spring Boot: login, gestión de solicitudes, historial de decisiones con gráfico de contribuciones SHAP, simulador what-if, versiones de modelo y dashboard de auditoría. Solo presentación: las decisiones las toma siempre el backend.
+6. ✅ **Fase 6 — Frontend:** SPA en React + TypeScript (Vite) sobre el API de Spring Boot: login, gestión de solicitudes, historial de decisiones con gráfico de contribuciones SHAP, simulador what-if, versiones de modelo y dashboard de auditoría. Solo presentación: las decisiones las toma siempre el backend.
 7. **Fase 7 — Pulido:** documentación ampliada, README con diagramas.
 
 ## Licencia

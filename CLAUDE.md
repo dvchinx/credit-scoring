@@ -114,11 +114,12 @@ Flujo de una solicitud de crédito:
 ## Comandos útiles
 
 ```bash
-docker-compose up -d          # levanta Postgres y servicios auxiliares
-./mvnw spring-boot:run         # corre el backend
-./mvnw test                    # corre tests
-cd frontend && npm run dev     # corre el frontend (Fase 6)
-cd frontend && npm test        # tests del frontend (Fase 6)
+docker-compose up -d                         # Postgres, servicio de ML y frontend (nginx en :3000)
+cd backend && bash mvnw spring-boot:run      # backend (mvnw no tiene bit de ejecución: invocarlo con bash)
+cd backend && bash mvnw test                 # tests unitarios del backend
+cd backend && bash mvnw verify               # unitarios + integración (Testcontainers; requiere Docker)
+cd ml-service && pytest                      # tests del servicio de ML
+cd frontend && npm run dev                   # frontend en desarrollo (:5173; requiere frontend/.env)
+cd frontend && npm test                      # tests del frontend (Vitest)
+cd frontend && npm run build                 # typecheck + build de producción
 ```
-
-(Actualizar esta sección a medida que se agreguen scripts reales del proyecto.)

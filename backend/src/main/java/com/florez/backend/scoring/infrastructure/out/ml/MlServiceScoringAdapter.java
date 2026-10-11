@@ -2,15 +2,11 @@ package com.florez.backend.scoring.infrastructure.out.ml;
 
 import com.florez.backend.scoring.domain.exception.ScoringUnavailableException;
 import com.florez.backend.scoring.domain.model.Explanation;
-import com.florez.backend.scoring.domain.model.FeatureContribution;
 import com.florez.backend.scoring.domain.model.ModelFeatures;
 import com.florez.backend.scoring.domain.model.RiskAssessment;
-import com.florez.backend.scoring.domain.model.RiskDirection;
 import com.florez.backend.scoring.domain.port.out.ScoringModelPort;
 import com.florez.backend.scoring.infrastructure.out.ml.dto.MlExplainResponse;
-import com.florez.backend.scoring.infrastructure.out.ml.dto.MlFeatureContribution;
 import com.florez.backend.scoring.infrastructure.out.ml.dto.MlScoreResponse;
-import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
@@ -34,68 +30,49 @@ public class MlServiceScoringAdapter implements ScoringModelPort {
 
     @Override
     public RiskAssessment score(String modelVersion, ModelFeatures features) {
-        MlScoreResponse response = post("/score", modelVersion, features, MlScoreResponse.class);
+        MlScoreResponse response = post(restClient, "/score", modelVersion, features.asFeatureMap(), MlScoreResponse.class);
         if (anyNull(response.probabilityOfDefault(), response.riskScore(), response.modelVersion())) {
-            throw invalidResponse("/score");
+            throw MlContributionMapper.invalid("/score");
         }
         return new RiskAssessment(response.probabilityOfDefault(), response.riskScore(), response.modelVersion());
     }
 
     @Override
     public Explanation explain(String modelVersion, ModelFeatures features) {
-        MlExplainResponse response = post("/explain", modelVersion, features, MlExplainResponse.class);
-        if (anyNull(response.modelVersion(), response.baseValue(), response.outputValue(), response.contributions())
-                || response.contributions().isEmpty()) {
-            throw invalidResponse("/explain");
+        MlExplainResponse response =
+                post(restClient, "/explain", modelVersion, features.asFeatureMap(), MlExplainResponse.class);
+        if (anyNull(response.modelVersion(), response.baseValue(), response.outputValue())) {
+            throw MlContributionMapper.invalid("/explain");
         }
-        List<FeatureContribution> contributions = response.contributions().stream()
-                .map(this::toDomain)
-                .toList();
-        return new Explanation(response.modelVersion(), response.baseValue(), response.outputValue(), contributions);
+        return new Explanation(response.modelVersion(), response.baseValue(), response.outputValue(),
+                MlContributionMapper.toDomain(response.contributions(), "/explain"));
     }
 
-    private FeatureContribution toDomain(MlFeatureContribution contribution) {
-        if (anyNull(contribution.feature(), contribution.value(), contribution.shapValue(), contribution.direction())) {
-            throw invalidResponse("/explain");
-        }
-        return new FeatureContribution(
-                contribution.feature(), contribution.value(), contribution.shapValue(), toDirection(contribution.direction()));
-    }
-
-    private RiskDirection toDirection(String direction) {
-        return switch (direction) {
-            case "increases_risk" -> RiskDirection.INCREASES_RISK;
-            case "decreases_risk" -> RiskDirection.DECREASES_RISK;
-            case "neutral" -> RiskDirection.NEUTRAL;
-            default -> throw invalidResponse("/explain");
-        };
-    }
-
-    private <T> T post(String path, String modelVersion, ModelFeatures features, Class<T> responseType) {
-        T body;
+    /**
+     * POST al servicio de ML fijando la versión de modelo.
+     *
+     * @throws ScoringUnavailableException si el servicio no responde, devuelve error o un cuerpo vacío
+     */
+    public static <T> T post(RestClient restClient, String path, String modelVersion, Object body, Class<T> responseType) {
+        T response;
         try {
-            body = restClient.post()
+            response = restClient.post()
                     .uri(uriBuilder -> uriBuilder.path(path).queryParam("model_version", modelVersion).build())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(features.asFeatureMap())
+                    .body(body)
                     .retrieve()
                     .body(responseType);
         } catch (RestClientException e) {
             log.warn("Fallo llamando al servicio de ML en {}: {}", path, e.getMessage());
             throw new ScoringUnavailableException("el servicio de ML no respondió correctamente en " + path, e);
         }
-        if (body == null) {
-            throw invalidResponse(path);
+        if (response == null) {
+            throw MlContributionMapper.invalid(path);
         }
-        return body;
+        return response;
     }
 
-    private static ScoringUnavailableException invalidResponse(String path) {
-        log.warn("Respuesta incompleta o inválida del servicio de ML en {}", path);
-        return new ScoringUnavailableException("el servicio de ML devolvió una respuesta inválida en " + path);
-    }
-
-    private static boolean anyNull(Object... values) {
+    public static boolean anyNull(Object... values) {
         return Stream.of(values).anyMatch(Objects::isNull);
     }
 }

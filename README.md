@@ -11,7 +11,9 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo qu
 - **Fase 3 — Explicabilidad** completada: el servicio de ML expone `/explain` (valores SHAP exactos) y el backend evalúa solicitudes y persiste cada decisión con su score, explicación, versión de modelo, política aplicada y snapshot de los datos de entrada.
 - **Fase 4 — Model registry y versionado** completada: cada entrenamiento genera una versión inmutable con metadata completa (dataset, métricas, hiperparámetros, hash del artefacto); el backend registra versiones, decide cuál está activa y guarda el historial de activaciones con su motivo.
 
-El what-if analysis y el frontend llegan en fases posteriores — ver [Roadmap](#roadmap).
+- **Fase 5 — What-if analysis** completada: simulación de cambios en la solicitud con el modelo activo y la política vigente, comparada contra el escenario real y registrada para auditoría sin crear decisiones.
+
+El frontend llega en la fase siguiente — ver [Roadmap](#roadmap).
 
 ## Arquitectura
 
@@ -23,7 +25,7 @@ El what-if analysis y el frontend llegan en fases posteriores — ver [Roadmap](
         │
         ├──► [ML Service (FastAPI)] ──► [Versiones de modelo en disco + SHAP]
         │           │      /score?model_version= ✅ (fase 2)   /explain ✅ (fase 3)   /models ✅ (fase 4)
-        │           └──► /what-if (simulación de variables)      (fase 5)
+        │           └──► /what-if ✅ (fase 5): ambos escenarios con el mismo modelo cargado
         │
         └──► [Model Registry] ✅ (fase 4): versiones registradas + log de activaciones (en PostgreSQL)
 ```
@@ -62,6 +64,37 @@ POST .../decisions     ──►  /score?model_version=<activa>  y  /explain?mod
 7. En una sola transacción se inserta la decisión y se actualiza el estado de la solicitud.
 
 Cada evaluación crea una decisión nueva; las anteriores se conservan. La tabla `credit_decisions` es **append-only**: un trigger de Postgres rechaza cualquier `UPDATE` o `DELETE`, y un `CHECK` impide guardar una decisión `COMPLETED` sin score, explicación y versión de modelo.
+
+### What-if analysis (`POST /credit-applications/{id}/what-if`)
+
+Responde "¿qué pasaría si…?" sobre una solicitud: qué decisión tomaría el sistema si el ingreso fuera mayor, el monto menor o la utilización de crédito más baja. Sirve al solicitante ("qué mejorar") y a auditoría interna.
+
+```json
+{"monthlyIncome": 4200, "creditHistory": {"revolvingUtilization": 0.10}}
+```
+
+- **Se simulan datos de la solicitud, no variables crudas del modelo:** los cambios pasan por la misma derivación (`debt_ratio` con la cuota nueva) y la misma política que una decisión real, reglas duras incluidas. Simular un monto mayor puede rechazar por endeudamiento aunque el riesgo del modelo no cambie. Variables simulables: ingreso, monto, plazo, deuda existente, dependientes y todo `creditHistory`. Un campo ausente mantiene su valor real.
+- **Comparación justa:** el escenario real y el simulado se evalúan en la misma llamada a `/what-if` del ML, con la versión activa y la política vigente. La diferencia se debe solo a los cambios, no a que el modelo haya cambiado desde la última decisión.
+- **Atribución exacta:** con un modelo lineal, cambiar una variable solo mueve su propia contribución SHAP. `featureImpacts` muestra, por variable del modelo, el valor y el SHAP en ambos escenarios y su diferencia (`shapDelta`). Cambiar `monthlyIncome` mueve dos variables, `monthly_income` y `debt_ratio`, porque el endeudamiento depende del ingreso.
+- **Nunca es una decisión:** no crea registros en `credit_decisions` ni cambia el estado de la solicitud.
+- **Auditable:** cada simulación se guarda en `what_if_simulations` (append-only, con quién, cuándo, qué cambió y ambos resultados). Las columnas `baseline_outcome`/`scenario_outcome` permiten encontrar rápido las simulaciones que cambiaron el resultado, por ejemplo para detectar si alguien probó variantes hasta encontrar una que aprueba y luego editó la solicitud con esos valores.
+
+Respuesta (resumida, valores ilustrativos):
+
+```json
+{
+  "modelVersion": "20261004T120000Z",
+  "changes": [{"variable": "creditHistory.revolvingUtilization", "baselineValue": 0.35, "scenarioValue": 0.10}],
+  "baseline": {"outcome": "MANUAL_REVIEW", "probabilityOfDefault": 0.41, "riskScore": 625, "reasons": ["..."]},
+  "scenario": {"outcome": "APPROVED", "probabilityOfDefault": 0.27, "riskScore": 701, "reasons": ["..."]},
+  "decisionChanged": true,
+  "probabilityOfDefaultDelta": -0.14,
+  "featureImpacts": [
+    {"feature": "revolving_utilization_of_unsecured_lines", "baselineValue": 0.35, "scenarioValue": 0.10,
+     "baselineShap": 0.21, "scenarioShap": -0.43, "shapDelta": -0.64, "changed": true}
+  ]
+}
+```
 
 ### De la solicitud a las variables del modelo
 
@@ -111,6 +144,7 @@ com.florez.backend
 ├── scoring/                 Evaluación y decisiones: política de crédito, explicación SHAP, cliente HTTP del servicio de ML,
 │                            persistencia append-only de decisiones
 ├── modelregistry/           Versiones de modelo registradas, activaciones auditadas, catálogo del servicio de ML
+├── whatif/                  Simulación de escenarios sobre una solicitud y su registro de auditoría
 └── common/                  Excepciones de dominio, manejo de errores centralizado, entidad base de auditoría JPA,
                              TransactionRunner (port para delimitar transacciones sin acoplar los casos de uso a Spring)
 ```
@@ -238,6 +272,8 @@ Los valores SHAP están en log-odds de default: `baseValue + Σ shapValue = outp
 | DELETE | `/credit-applications/{id}` | JWT | Elimina una solicitud (soft-delete) |
 | POST | `/credit-applications/{id}/decisions` | JWT | Evalúa la solicitud con el modelo activo y crea una decisión explicada (`409` si no hay modelo activo, `503` si el ML no está disponible) |
 | GET | `/credit-applications/{id}/decisions` | JWT | Historial de decisiones de la solicitud, de la más reciente a la más antigua |
+| POST | `/credit-applications/{id}/what-if` | JWT | Simula cambios en la solicitud y compara la decisión simulada con la real; no crea decisiones (`409` si no hay modelo activo) |
+| GET | `/credit-applications/{id}/what-if` | JWT | Simulaciones hechas sobre la solicitud, de la más reciente a la más antigua |
 | POST | `/model-versions` | `ADMIN` | Registra una versión entrenada (`{"version"}`); la metadata se lee del servicio de ML |
 | GET | `/model-versions` | JWT | Versiones registradas con su metadata y cuál está activa |
 | GET | `/model-versions/{version}` | JWT | Detalle de una versión |
@@ -260,7 +296,7 @@ cd backend
 2. ✅ **Fase 2 — Servicio de ML base:** microservicio FastAPI entrenado sobre un dataset público ("Give Me Some Credit"), expone `/score`.
 3. ✅ **Fase 3 — Explicabilidad:** `/explain` con valores SHAP, decisiones explicadas y append-only en el backend.
 4. ✅ **Fase 4 — Model registry y versionado:** versiones inmutables con metadata completa y hash verificado, activación auditada con rollback, decisiones ligadas a su versión.
-5. **Fase 5 — What-if analysis:** simulación de cambios en variables del solicitante.
+5. ✅ **Fase 5 — What-if analysis:** simulación de cambios en la solicitud con la misma derivación y política que una decisión real, atribución por variable y registro auditable.
 6. **Fase 6 — Frontend:** SPA en React + TypeScript (Vite) sobre el API de Spring Boot: login, gestión de solicitudes, historial de decisiones con gráfico de contribuciones SHAP, simulador what-if, versiones de modelo y dashboard de auditoría. Solo presentación: las decisiones las toma siempre el backend.
 7. **Fase 7 — Pulido:** documentación ampliada, README con diagramas.
 

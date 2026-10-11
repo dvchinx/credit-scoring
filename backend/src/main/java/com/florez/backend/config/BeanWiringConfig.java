@@ -12,10 +12,14 @@ import com.florez.backend.modelregistry.domain.port.out.ModelActivationRepositor
 import com.florez.backend.modelregistry.domain.port.out.ModelArtifactCatalogPort;
 import com.florez.backend.modelregistry.domain.port.out.ModelVersionRepositoryPort;
 import com.florez.backend.scoring.application.CreditDecisionService;
+import com.florez.backend.scoring.domain.model.DecisionPolicy;
 import com.florez.backend.scoring.domain.model.ModelFeatures;
 import com.florez.backend.scoring.domain.port.out.CreditDecisionRepositoryPort;
 import com.florez.backend.scoring.domain.port.out.ScoringModelPort;
 import com.florez.backend.scoring.infrastructure.config.CreditPolicyProperties;
+import com.florez.backend.whatif.application.WhatIfService;
+import com.florez.backend.whatif.domain.port.out.WhatIfModelPort;
+import com.florez.backend.whatif.domain.port.out.WhatIfSimulationRepositoryPort;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -70,17 +74,35 @@ public class BeanWiringConfig {
             CreditDecisionRepositoryPort decisionRepositoryPort,
             ScoringModelPort scoringModelPort,
             ModelRegistryService modelRegistryService,
-            CreditPolicyProperties creditPolicyProperties,
+            DecisionPolicy decisionPolicy,
             TransactionRunner transactionRunner,
             Clock clock) {
-        // toDomain() valida los umbrales: una política mal configurada impide arrancar la aplicación.
         return new CreditDecisionService(
                 applicationRepositoryPort,
                 decisionRepositoryPort,
                 scoringModelPort,
                 modelRegistryService,
-                creditPolicyProperties.toDomain(),
+                decisionPolicy,
                 transactionRunner,
                 clock);
+    }
+
+    /** Misma política para decisiones reales y simulaciones: un what-if predice exactamente lo que se decidiría. */
+    @Bean
+    DecisionPolicy decisionPolicy(CreditPolicyProperties creditPolicyProperties) {
+        // toDomain() valida los umbrales: una política mal configurada impide arrancar la aplicación.
+        return creditPolicyProperties.toDomain();
+    }
+
+    @Bean
+    WhatIfService whatIfService(
+            CreditApplicationRepositoryPort applicationRepositoryPort,
+            WhatIfSimulationRepositoryPort simulationRepositoryPort,
+            WhatIfModelPort whatIfModelPort,
+            ModelRegistryService modelRegistryService,
+            DecisionPolicy decisionPolicy,
+            Clock clock) {
+        return new WhatIfService(
+                applicationRepositoryPort, simulationRepositoryPort, whatIfModelPort, modelRegistryService, decisionPolicy, clock);
     }
 }

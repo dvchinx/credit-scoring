@@ -74,6 +74,29 @@ public record ModelFeatures(
                 .doubleValue();
     }
 
+    /** Inversa de {@link #asFeatureMap()}: reconstruye las features desde sus nombres canónicos. */
+    public static ModelFeatures fromFeatureMap(Map<String, ? extends Number> features) {
+        return new ModelFeatures(
+                feature(features, "revolving_utilization_of_unsecured_lines").doubleValue(),
+                feature(features, "age").intValue(),
+                feature(features, "number_of_time_30_59_days_past_due_not_worse").intValue(),
+                feature(features, "debt_ratio").doubleValue(),
+                feature(features, "monthly_income").doubleValue(),
+                feature(features, "number_of_open_credit_lines_and_loans").intValue(),
+                feature(features, "number_of_times_90_days_late").intValue(),
+                feature(features, "number_real_estate_loans_or_lines").intValue(),
+                feature(features, "number_of_time_60_89_days_past_due_not_worse").intValue(),
+                feature(features, "number_of_dependents").intValue());
+    }
+
+    private static Number feature(Map<String, ? extends Number> features, String name) {
+        Number value = features.get(name);
+        if (value == null) {
+            throw new IllegalArgumentException("Falta la feature '" + name + "'");
+        }
+        return value;
+    }
+
     /** Features con sus nombres canónicos del modelo, en el orden de entrenamiento. */
     public Map<String, Number> asFeatureMap() {
         Map<String, Number> features = new LinkedHashMap<>();

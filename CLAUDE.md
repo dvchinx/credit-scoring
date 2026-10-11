@@ -60,7 +60,7 @@ Flujo de una solicitud de crédito:
 4. Se obtiene la explicación (`/explain`) — variables que más influyeron, en qué dirección y magnitud.
 5. Se combina score + reglas de negocio (ej. umbrales regulatorios, listas de exclusión) → decisión final.
 6. Se persiste la decisión junto con: score, explicación completa, versión de modelo usada, y snapshot de los datos de entrada (para poder reconstruir la decisión más adelante).
-7. Endpoint adicional (`GET /credit-applications/{id}/what-if`) permite simular cómo cambiaría la decisión si una variable fuera distinta (ej. "¿y si el ingreso fuera 20% mayor?").
+7. Endpoint adicional (`POST /credit-applications/{id}/what-if`) permite simular cómo cambiaría la decisión si una variable fuera distinta (ej. "¿y si el ingreso fuera 20% mayor?"). Es POST porque lleva los cambios en el cuerpo y cada simulación queda registrada para auditoría; nunca crea una decisión.
 
 ## Convenciones de código
 

@@ -52,7 +52,7 @@ final class CreditDecisionMapper {
                 entity.getStatus(),
                 entity.getOutcome(),
                 read(entity.getApplicationSnapshot(), new TypeReference<ApplicationSnapshot>() { }),
-                toModelFeatures(read(entity.getModelInput(), new TypeReference<Map<String, Number>>() { })),
+                ModelFeatures.fromFeatureMap(read(entity.getModelInput(), new TypeReference<Map<String, Number>>() { })),
                 risk,
                 entity.getExplanation() == null ? null : read(entity.getExplanation(), new TypeReference<Explanation>() { }),
                 read(entity.getPolicy(), new TypeReference<DecisionPolicy>() { }),
@@ -60,27 +60,5 @@ final class CreditDecisionMapper {
                 entity.getFailureReason(),
                 entity.getDecidedBy(),
                 entity.getDecidedAt());
-    }
-
-    private static ModelFeatures toModelFeatures(Map<String, Number> features) {
-        return new ModelFeatures(
-                feature(features, "revolving_utilization_of_unsecured_lines").doubleValue(),
-                feature(features, "age").intValue(),
-                feature(features, "number_of_time_30_59_days_past_due_not_worse").intValue(),
-                feature(features, "debt_ratio").doubleValue(),
-                feature(features, "monthly_income").doubleValue(),
-                feature(features, "number_of_open_credit_lines_and_loans").intValue(),
-                feature(features, "number_of_times_90_days_late").intValue(),
-                feature(features, "number_real_estate_loans_or_lines").intValue(),
-                feature(features, "number_of_time_60_89_days_past_due_not_worse").intValue(),
-                feature(features, "number_of_dependents").intValue());
-    }
-
-    private static Number feature(Map<String, Number> features, String name) {
-        Number value = features.get(name);
-        if (value == null) {
-            throw new IllegalStateException("La entrada del modelo almacenada no contiene la feature '" + name + "'");
-        }
-        return value;
     }
 }

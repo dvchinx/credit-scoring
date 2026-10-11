@@ -39,7 +39,7 @@ class MlServiceScoringAdapterTest {
 
     @Test
     void score_enviaLasFeaturesConNombresCanonicosYMapeaLaRespuesta() {
-        server.expect(requestTo("http://ml-service/score"))
+        server.expect(requestTo("http://ml-service/score?model_version=20261004T120000Z"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.revolving_utilization_of_unsecured_lines").value(0.3))
                 .andExpect(jsonPath("$.age").value(45))
@@ -49,7 +49,7 @@ class MlServiceScoringAdapterTest {
                         {"probability_of_default": 0.123, "risk_score": 782, "model_version": "20261004T120000Z"}
                         """, MediaType.APPLICATION_JSON));
 
-        RiskAssessment risk = adapter.score(FEATURES);
+        RiskAssessment risk = adapter.score("20261004T120000Z", FEATURES);
 
         assertThat(risk).isEqualTo(new RiskAssessment(0.123, 782, "20261004T120000Z"));
         server.verify();
@@ -57,7 +57,7 @@ class MlServiceScoringAdapterTest {
 
     @Test
     void explain_mapeaContribucionesYDireccion() {
-        server.expect(requestTo("http://ml-service/explain"))
+        server.expect(requestTo("http://ml-service/explain?model_version=v1"))
                 .andRespond(withSuccess("""
                         {"model_version": "v1", "base_value": -0.4, "output_value": -0.9,
                          "contributions": [
@@ -66,7 +66,7 @@ class MlServiceScoringAdapterTest {
                          ]}
                         """, MediaType.APPLICATION_JSON));
 
-        Explanation explanation = adapter.explain(FEATURES);
+        Explanation explanation = adapter.explain("v1", FEATURES);
 
         assertThat(explanation.modelVersion()).isEqualTo("v1");
         assertThat(explanation.baseValue()).isEqualTo(-0.4);
@@ -77,48 +77,48 @@ class MlServiceScoringAdapterTest {
 
     @Test
     void score_conModeloNoCargado_lanzaScoringUnavailable() {
-        server.expect(requestTo("http://ml-service/score")).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        server.expect(requestTo("http://ml-service/score?model_version=v1")).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
 
-        assertThatThrownBy(() -> adapter.score(FEATURES))
+        assertThatThrownBy(() -> adapter.score("v1", FEATURES))
                 .isInstanceOf(ScoringUnavailableException.class)
                 .hasMessageContaining("/score");
     }
 
     @Test
     void score_conErrorDeConexion_lanzaScoringUnavailable() {
-        server.expect(requestTo("http://ml-service/score")).andRespond(withException(new IOException("connection refused")));
+        server.expect(requestTo("http://ml-service/score?model_version=v1")).andRespond(withException(new IOException("connection refused")));
 
-        assertThatThrownBy(() -> adapter.score(FEATURES)).isInstanceOf(ScoringUnavailableException.class);
+        assertThatThrownBy(() -> adapter.score("v1", FEATURES)).isInstanceOf(ScoringUnavailableException.class);
     }
 
     @Test
     void score_conRespuestaIncompleta_lanzaScoringUnavailable() {
-        server.expect(requestTo("http://ml-service/score"))
+        server.expect(requestTo("http://ml-service/score?model_version=v1"))
                 .andRespond(withSuccess("{\"probability_of_default\": 0.1}", MediaType.APPLICATION_JSON));
 
-        assertThatThrownBy(() -> adapter.score(FEATURES))
+        assertThatThrownBy(() -> adapter.score("v1", FEATURES))
                 .isInstanceOf(ScoringUnavailableException.class)
                 .hasMessageContaining("respuesta inválida");
     }
 
     @Test
     void explain_sinContribuciones_lanzaScoringUnavailable() {
-        server.expect(requestTo("http://ml-service/explain"))
+        server.expect(requestTo("http://ml-service/explain?model_version=v1"))
                 .andRespond(withSuccess("""
                         {"model_version": "v1", "base_value": -0.4, "output_value": -0.4, "contributions": []}
                         """, MediaType.APPLICATION_JSON));
 
-        assertThatThrownBy(() -> adapter.explain(FEATURES)).isInstanceOf(ScoringUnavailableException.class);
+        assertThatThrownBy(() -> adapter.explain("v1", FEATURES)).isInstanceOf(ScoringUnavailableException.class);
     }
 
     @Test
     void explain_conDireccionDesconocida_lanzaScoringUnavailable() {
-        server.expect(requestTo("http://ml-service/explain"))
+        server.expect(requestTo("http://ml-service/explain?model_version=v1"))
                 .andRespond(withSuccess("""
                         {"model_version": "v1", "base_value": -0.4, "output_value": -0.9,
                          "contributions": [{"feature": "age", "value": 45, "shap_value": -0.6, "direction": "sideways"}]}
                         """, MediaType.APPLICATION_JSON));
 
-        assertThatThrownBy(() -> adapter.explain(FEATURES)).isInstanceOf(ScoringUnavailableException.class);
+        assertThatThrownBy(() -> adapter.explain("v1", FEATURES)).isInstanceOf(ScoringUnavailableException.class);
     }
 }

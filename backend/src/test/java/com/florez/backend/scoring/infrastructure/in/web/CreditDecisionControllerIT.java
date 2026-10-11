@@ -2,6 +2,8 @@ package com.florez.backend.scoring.infrastructure.in.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,6 +11,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.florez.backend.TestcontainersConfig;
+import com.florez.backend.modelregistry.ModelRegistryTestData;
+import com.florez.backend.modelregistry.domain.port.out.ModelActivationRepositoryPort;
+import com.florez.backend.modelregistry.domain.port.out.ModelVersionRepositoryPort;
 import com.florez.backend.scoring.ScoringTestData;
 import com.florez.backend.scoring.domain.exception.ScoringUnavailableException;
 import com.florez.backend.scoring.domain.port.out.ScoringModelPort;
@@ -35,6 +40,12 @@ class CreditDecisionControllerIT {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ModelVersionRepositoryPort modelVersions;
+
+    @Autowired
+    private ModelActivationRepositoryPort modelActivations;
+
     @MockitoBean
     private ScoringModelPort scoringModel;
 
@@ -47,6 +58,10 @@ class CreditDecisionControllerIT {
                         .content("{\"username\":\"admin\",\"password\":\"ChangeMe123!\"}"))
                 .andReturn().getResponse().getContentAsString();
         token = objectMapper.readTree(response).get("token").asText();
+    }
+
+    private void activateModel(String version) {
+        ModelRegistryTestData.activate(version, modelVersions, modelActivations);
     }
 
     private String createApplication(String documentId, String requestedAmount) throws Exception {
@@ -89,8 +104,9 @@ class CreditDecisionControllerIT {
 
     @Test
     void evaluate_conBajoRiesgo_apruebaYPersisteLaExplicacion() throws Exception {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.12, "20261004T120000Z"));
-        when(scoringModel.explain(any())).thenReturn(ScoringTestData.explanation("20261004T120000Z"));
+        activateModel("20261004T120000Z");
+        when(scoringModel.score(eq("20261004T120000Z"), any())).thenReturn(ScoringTestData.risk(0.12, "20261004T120000Z"));
+        when(scoringModel.explain(eq("20261004T120000Z"), any())).thenReturn(ScoringTestData.explanation("20261004T120000Z"));
         String applicationId = createApplication("DEC-CTRL-1", "12000.00");
 
         String response = mockMvc.perform(post("/credit-applications/" + applicationId + "/decisions")
@@ -119,8 +135,9 @@ class CreditDecisionControllerIT {
 
     @Test
     void evaluate_conEndeudamientoExcesivo_rechazaPorReglaDuraAunqueElModeloApruebe() throws Exception {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.05, "v1"));
-        when(scoringModel.explain(any())).thenReturn(ScoringTestData.explanation("v1"));
+        activateModel("v1");
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.05, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenReturn(ScoringTestData.explanation("v1"));
         // (200 + 60000 / 24) / 3500 = 77% de endeudamiento
         String applicationId = createApplication("DEC-CTRL-2", "60000.00");
 
@@ -136,7 +153,8 @@ class CreditDecisionControllerIT {
 
     @Test
     void evaluate_conServicioDeMlCaido_devuelve503YRegistraElIntentoFallido() throws Exception {
-        when(scoringModel.score(any())).thenThrow(new ScoringUnavailableException("el servicio de ML no respondió"));
+        activateModel("v1");
+        when(scoringModel.score(anyString(), any())).thenThrow(new ScoringUnavailableException("el servicio de ML no respondió"));
         String applicationId = createApplication("DEC-CTRL-3", "12000.00");
 
         mockMvc.perform(post("/credit-applications/" + applicationId + "/decisions")
@@ -155,17 +173,17 @@ class CreditDecisionControllerIT {
     }
 
     @Test
-    void reevaluar_creaUnaDecisionNuevaYConservaLaAnterior() throws Exception {
-        when(scoringModel.score(any()))
-                .thenReturn(ScoringTestData.risk(0.45, "v1"))
-                .thenReturn(ScoringTestData.risk(0.10, "v2"));
-        when(scoringModel.explain(any()))
-                .thenReturn(ScoringTestData.explanation("v1"))
-                .thenReturn(ScoringTestData.explanation("v2"));
+    void reevaluarTrasActivarOtraVersion_creaUnaDecisionNuevaConEsaVersionYConservaLaAnterior() throws Exception {
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.45, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenReturn(ScoringTestData.explanation("v1"));
+        when(scoringModel.score(eq("v2"), any())).thenReturn(ScoringTestData.risk(0.10, "v2"));
+        when(scoringModel.explain(eq("v2"), any())).thenReturn(ScoringTestData.explanation("v2"));
         String applicationId = createApplication("DEC-CTRL-4", "12000.00");
         String decisionsPath = "/credit-applications/" + applicationId + "/decisions";
 
+        activateModel("v1");
         mockMvc.perform(post(decisionsPath).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+        activateModel("v2");
         mockMvc.perform(post(decisionsPath).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
 
         JsonNode history = getJson(decisionsPath);

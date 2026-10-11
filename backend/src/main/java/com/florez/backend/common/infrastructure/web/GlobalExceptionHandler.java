@@ -1,5 +1,6 @@
 package com.florez.backend.common.infrastructure.web;
 
+import com.florez.backend.common.domain.BusinessRuleException;
 import com.florez.backend.common.domain.DuplicateResourceException;
 import com.florez.backend.common.domain.InvalidCredentialsException;
 import com.florez.backend.common.domain.InvalidTokenException;
@@ -11,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -28,6 +30,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateResourceException.class)
     public ResponseEntity<ErrorResponse> handleDuplicate(DuplicateResourceException ex, HttpServletRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(BusinessRuleException.class)
+    public ResponseEntity<ErrorResponse> handleBusinessRule(BusinessRuleException ex, HttpServletRequest request) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    /**
+     * {@code @PreAuthorize} deniega dentro del controller, así que la excepción llega aquí y no al
+     * AccessDeniedHandler de Spring Security; sin este handler acabaría como 500.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
+        return build(HttpStatus.FORBIDDEN, "No tienes permisos para realizar esta operación", request);
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)

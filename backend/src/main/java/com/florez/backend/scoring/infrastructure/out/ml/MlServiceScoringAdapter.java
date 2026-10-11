@@ -16,23 +16,25 @@ import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 /** Cliente HTTP del microservicio de ML (FastAPI): endpoints {@code /score} y {@code /explain}. */
+@Component
 public class MlServiceScoringAdapter implements ScoringModelPort {
 
     private static final Logger log = LoggerFactory.getLogger(MlServiceScoringAdapter.class);
 
     private final RestClient restClient;
 
-    public MlServiceScoringAdapter(RestClient restClient) {
-        this.restClient = restClient;
+    public MlServiceScoringAdapter(RestClient mlServiceRestClient) {
+        this.restClient = mlServiceRestClient;
     }
 
     @Override
-    public RiskAssessment score(ModelFeatures features) {
-        MlScoreResponse response = post("/score", features, MlScoreResponse.class);
+    public RiskAssessment score(String modelVersion, ModelFeatures features) {
+        MlScoreResponse response = post("/score", modelVersion, features, MlScoreResponse.class);
         if (anyNull(response.probabilityOfDefault(), response.riskScore(), response.modelVersion())) {
             throw invalidResponse("/score");
         }
@@ -40,8 +42,8 @@ public class MlServiceScoringAdapter implements ScoringModelPort {
     }
 
     @Override
-    public Explanation explain(ModelFeatures features) {
-        MlExplainResponse response = post("/explain", features, MlExplainResponse.class);
+    public Explanation explain(String modelVersion, ModelFeatures features) {
+        MlExplainResponse response = post("/explain", modelVersion, features, MlExplainResponse.class);
         if (anyNull(response.modelVersion(), response.baseValue(), response.outputValue(), response.contributions())
                 || response.contributions().isEmpty()) {
             throw invalidResponse("/explain");
@@ -69,11 +71,11 @@ public class MlServiceScoringAdapter implements ScoringModelPort {
         };
     }
 
-    private <T> T post(String path, ModelFeatures features, Class<T> responseType) {
+    private <T> T post(String path, String modelVersion, ModelFeatures features, Class<T> responseType) {
         T body;
         try {
             body = restClient.post()
-                    .uri(path)
+                    .uri(uriBuilder -> uriBuilder.path(path).queryParam("model_version", modelVersion).build())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(features.asFeatureMap())
                     .retrieve()

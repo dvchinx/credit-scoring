@@ -7,6 +7,7 @@ import java.math.MathContext;
 import java.time.LocalDate;
 import java.time.Period;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,6 +26,19 @@ public record ModelFeatures(
         int numberRealEstateLoansOrLines,
         int numberOfTime60To89DaysPastDueNotWorse,
         int numberOfDependents) {
+
+    /** Variables que el backend sabe calcular, con su nombre canónico en el modelo, en orden de entrenamiento. */
+    public static final List<String> FEATURE_NAMES = List.of(
+            "revolving_utilization_of_unsecured_lines",
+            "age",
+            "number_of_time_30_59_days_past_due_not_worse",
+            "debt_ratio",
+            "monthly_income",
+            "number_of_open_credit_lines_and_loans",
+            "number_of_times_90_days_late",
+            "number_real_estate_loans_or_lines",
+            "number_of_time_60_89_days_past_due_not_worse",
+            "number_of_dependents");
 
     /**
      * Traduce una solicitud a las variables del modelo:

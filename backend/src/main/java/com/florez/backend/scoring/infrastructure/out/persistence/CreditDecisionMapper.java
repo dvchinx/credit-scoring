@@ -1,10 +1,9 @@
 package com.florez.backend.scoring.infrastructure.out.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import static com.florez.backend.common.infrastructure.persistence.JsonColumnCodec.read;
+import static com.florez.backend.common.infrastructure.persistence.JsonColumnCodec.write;
+
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.florez.backend.scoring.domain.model.ApplicationSnapshot;
 import com.florez.backend.scoring.domain.model.CreditDecision;
 import com.florez.backend.scoring.domain.model.DecisionPolicy;
@@ -20,10 +19,6 @@ import java.util.Map;
  * exactamente el payload que se envió a {@code /score} y {@code /explain}.
  */
 final class CreditDecisionMapper {
-
-    private static final ObjectMapper JSON = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private CreditDecisionMapper() {
     }
@@ -87,21 +82,5 @@ final class CreditDecisionMapper {
             throw new IllegalStateException("La entrada del modelo almacenada no contiene la feature '" + name + "'");
         }
         return value;
-    }
-
-    private static String write(Object value) {
-        try {
-            return JSON.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("No se pudo serializar la decisión a JSON", e);
-        }
-    }
-
-    private static <T> T read(String json, TypeReference<T> type) {
-        try {
-            return JSON.readValue(json, type);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("No se pudo leer la decisión almacenada", e);
-        }
     }
 }

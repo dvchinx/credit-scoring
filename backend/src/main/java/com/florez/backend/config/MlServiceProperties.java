@@ -1,4 +1,4 @@
-package com.florez.backend.scoring.infrastructure.out.ml;
+package com.florez.backend.config;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;

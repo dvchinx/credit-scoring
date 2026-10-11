@@ -48,7 +48,8 @@ class ModelFeaturesTest {
     void asFeatureMap_usaLosNombresCanonicosDelModeloEnOrdenDeEntrenamiento() {
         var features = ModelFeatures.from(ScoringTestData.pendingApplication(UUID.randomUUID()), LocalDate.of(2026, 10, 4));
 
-        assertThat(features.asFeatureMap().keySet()).containsExactly(
+        assertThat(features.asFeatureMap().keySet()).containsExactlyElementsOf(ModelFeatures.FEATURE_NAMES);
+        assertThat(ModelFeatures.FEATURE_NAMES).containsExactly(
                 "revolving_utilization_of_unsecured_lines",
                 "age",
                 "number_of_time_30_59_days_past_due_not_worse",

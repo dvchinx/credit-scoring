@@ -3,6 +3,8 @@ package com.florez.backend.scoring.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,8 +15,11 @@ import com.florez.backend.common.domain.ResourceNotFoundException;
 import com.florez.backend.creditapplication.domain.model.ApplicationStatus;
 import com.florez.backend.creditapplication.domain.model.CreditApplication;
 import com.florez.backend.creditapplication.domain.port.out.CreditApplicationRepositoryPort;
+import com.florez.backend.modelregistry.domain.model.ModelActivation;
+import com.florez.backend.modelregistry.domain.port.in.GetModelActivationsUseCase;
 import com.florez.backend.scoring.ScoringTestData;
 import com.florez.backend.scoring.domain.exception.CreditDecisionFailedException;
+import com.florez.backend.scoring.domain.exception.NoActiveModelVersionException;
 import com.florez.backend.scoring.domain.exception.ScoringUnavailableException;
 import com.florez.backend.scoring.domain.model.CreditDecision;
 import com.florez.backend.scoring.domain.model.DecisionOutcome;
@@ -49,6 +54,9 @@ class CreditDecisionServiceTest {
     @Mock
     private ScoringModelPort scoringModel;
 
+    @Mock
+    private GetModelActivationsUseCase modelActivations;
+
     private CreditDecisionService service;
 
     private final UUID applicationId = UUID.randomUUID();
@@ -62,16 +70,18 @@ class CreditDecisionServiceTest {
                 return work.get();
             }
         };
-        service = new CreditDecisionService(applicationRepository, decisionRepository, scoringModel,
+        service = new CreditDecisionService(applicationRepository, decisionRepository, scoringModel, modelActivations,
                 ScoringTestData.POLICY, inlineTransactions, Clock.fixed(NOW, ZoneOffset.UTC));
         application = ScoringTestData.pendingApplication(applicationId);
         lenient().when(applicationRepository.findByIdAndNotDeleted(applicationId)).thenReturn(Optional.of(application));
+        lenient().when(modelActivations.current())
+                .thenReturn(Optional.of(new ModelActivation(1L, "v1", "inicial", "admin", NOW.minusSeconds(3600))));
     }
 
     @Test
     void evaluate_conModeloDisponible_persisteDecisionExplicadaYActualizaLaSolicitud() {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
-        when(scoringModel.explain(any())).thenReturn(ScoringTestData.explanation("v1"));
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenReturn(ScoringTestData.explanation("v1"));
         when(decisionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         CreditDecision decision = service.evaluate(applicationId, "analyst1");
@@ -89,21 +99,21 @@ class CreditDecisionServiceTest {
 
     @Test
     void evaluate_enviaAlModeloLasFeaturesDerivadasALaFechaDeEvaluacion() {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
-        when(scoringModel.explain(any())).thenReturn(ScoringTestData.explanation("v1"));
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenReturn(ScoringTestData.explanation("v1"));
         when(decisionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.evaluate(applicationId, "analyst1");
 
         ArgumentCaptor<ModelFeatures> sent = ArgumentCaptor.forClass(ModelFeatures.class);
-        verify(scoringModel).score(sent.capture());
+        verify(scoringModel).score(eq("v1"), sent.capture());
         assertThat(sent.getValue().age()).isEqualTo(36);
-        verify(scoringModel).explain(sent.getValue());
+        verify(scoringModel).explain("v1", sent.getValue());
     }
 
     @Test
     void evaluate_conServicioDeMlCaido_registraIntentoFallidoSinCambiarLaSolicitud() {
-        when(scoringModel.score(any())).thenThrow(new ScoringUnavailableException("timeout"));
+        when(scoringModel.score(eq("v1"), any())).thenThrow(new ScoringUnavailableException("timeout"));
         UUID failedDecisionId = UUID.randomUUID();
         when(decisionRepository.save(any())).thenAnswer(invocation -> withId(invocation.getArgument(0), failedDecisionId));
 
@@ -122,8 +132,8 @@ class CreditDecisionServiceTest {
 
     @Test
     void evaluate_siLaExplicacionFalla_noGuardaUnaDecisionFinal() {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
-        when(scoringModel.explain(any())).thenThrow(new ScoringUnavailableException("explain caído"));
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenThrow(new ScoringUnavailableException("explain caído"));
         when(decisionRepository.save(any())).thenAnswer(invocation -> withId(invocation.getArgument(0), UUID.randomUUID()));
 
         assertThatThrownBy(() -> service.evaluate(applicationId, "analyst1"))
@@ -136,16 +146,28 @@ class CreditDecisionServiceTest {
     }
 
     @Test
-    void evaluate_conScoreYExplicacionDeVersionesDistintas_registraFallo() {
-        when(scoringModel.score(any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
-        when(scoringModel.explain(any())).thenReturn(ScoringTestData.explanation("v2"));
+    void evaluate_siElMlRespondeConOtraVersionQueLaActiva_registraFallo() {
+        when(scoringModel.score(eq("v1"), any())).thenReturn(ScoringTestData.risk(0.12, "v1"));
+        when(scoringModel.explain(eq("v1"), any())).thenReturn(ScoringTestData.explanation("v2"));
         when(decisionRepository.save(any())).thenAnswer(invocation -> withId(invocation.getArgument(0), UUID.randomUUID()));
 
         assertThatThrownBy(() -> service.evaluate(applicationId, "analyst1"))
                 .isInstanceOf(CreditDecisionFailedException.class)
-                .hasMessageContaining("versiones distintas");
+                .hasMessageContaining("se pidió el modelo v1")
+                .hasMessageContaining("explicación del modelo v2");
 
         verify(applicationRepository, never()).save(any());
+    }
+
+    @Test
+    void evaluate_sinVersionActiva_noLlamaAlModeloNiRegistraDecision() {
+        when(modelActivations.current()).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.evaluate(applicationId, "analyst1"))
+                .isInstanceOf(NoActiveModelVersionException.class);
+
+        verify(scoringModel, never()).score(anyString(), any());
+        verify(decisionRepository, never()).save(any());
     }
 
     @Test
@@ -154,7 +176,7 @@ class CreditDecisionServiceTest {
         when(applicationRepository.findByIdAndNotDeleted(unknownId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.evaluate(unknownId, "analyst1")).isInstanceOf(ResourceNotFoundException.class);
-        verify(scoringModel, never()).score(any());
+        verify(scoringModel, never()).score(anyString(), any());
     }
 
     private static CreditDecision withId(CreditDecision decision, UUID id) {

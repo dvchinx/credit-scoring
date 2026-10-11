@@ -5,12 +5,12 @@ import com.florez.backend.scoring.domain.model.Explanation;
 import com.florez.backend.scoring.domain.model.ModelFeatures;
 import com.florez.backend.scoring.domain.model.RiskAssessment;
 
-/** Modelo de riesgo activo (servicio de ML externo). */
+/** Modelos de riesgo servidos por el servicio de ML externo. La versión siempre se indica explícitamente. */
 public interface ScoringModelPort {
 
     /** @throws ScoringUnavailableException si el modelo no responde o la respuesta es inválida */
-    RiskAssessment score(ModelFeatures features);
+    RiskAssessment score(String modelVersion, ModelFeatures features);
 
     /** @throws ScoringUnavailableException si el modelo no responde o la respuesta es inválida */
-    Explanation explain(ModelFeatures features);
+    Explanation explain(String modelVersion, ModelFeatures features);
 }

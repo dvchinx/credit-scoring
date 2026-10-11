@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -46,6 +47,30 @@ class AuthControllerIT {
 
         mockMvc.perform(post("/auth/users").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(401));
+    }
+
+    @Test
+    void createUser_comoAnalista_devuelve403YNo500() throws Exception {
+        String adminToken = login("admin", "ChangeMe123!");
+        mockMvc.perform(post("/auth/users")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(new CreateUserPayload("analyst-403", "secret123", "ANALYST"))));
+        String analystToken = login("analyst-403", "secret123");
+
+        mockMvc.perform(post("/auth/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + analystToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CreateUserPayload("intruder", "secret123", "ADMIN"))))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(403));
+    }
+
+    private String login(String username, String password) throws Exception {
+        String response = mockMvc.perform(post("/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequestPayload(username, password))))
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).get("token").asText();
     }
 
     private record LoginRequestPayload(String username, String password) {

@@ -7,11 +7,19 @@ import com.florez.backend.auth.domain.port.out.UserRepositoryPort;
 import com.florez.backend.common.application.TransactionRunner;
 import com.florez.backend.creditapplication.application.CreditApplicationService;
 import com.florez.backend.creditapplication.domain.port.out.CreditApplicationRepositoryPort;
+import com.florez.backend.modelregistry.application.ModelRegistryService;
+import com.florez.backend.modelregistry.domain.port.out.ModelActivationRepositoryPort;
+import com.florez.backend.modelregistry.domain.port.out.ModelArtifactCatalogPort;
+import com.florez.backend.modelregistry.domain.port.out.ModelVersionRepositoryPort;
 import com.florez.backend.scoring.application.CreditDecisionService;
+import com.florez.backend.scoring.domain.model.ModelFeatures;
 import com.florez.backend.scoring.domain.port.out.CreditDecisionRepositoryPort;
 import com.florez.backend.scoring.domain.port.out.ScoringModelPort;
 import com.florez.backend.scoring.infrastructure.config.CreditPolicyProperties;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.util.Set;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,9 +33,13 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(CreditPolicyProperties.class)
 public class BeanWiringConfig {
 
+    /**
+     * Resolución de microsegundos, la misma que TIMESTAMPTZ en Postgres: un timestamp devuelto al
+     * crear una decisión o activación es idéntico al que se leerá después desde la base de datos.
+     */
     @Bean
     Clock clock() {
-        return Clock.systemDefaultZone();
+        return Clock.tick(Clock.systemDefaultZone(), Duration.of(1, ChronoUnit.MICROS));
     }
 
     @Bean
@@ -42,10 +54,22 @@ public class BeanWiringConfig {
     }
 
     @Bean
+    ModelRegistryService modelRegistryService(
+            ModelVersionRepositoryPort versionRepositoryPort,
+            ModelActivationRepositoryPort activationRepositoryPort,
+            ModelArtifactCatalogPort catalogPort,
+            Clock clock) {
+        // El registry solo acepta modelos cuyas variables de entrada el backend sabe calcular.
+        return new ModelRegistryService(
+                versionRepositoryPort, activationRepositoryPort, catalogPort, Set.copyOf(ModelFeatures.FEATURE_NAMES), clock);
+    }
+
+    @Bean
     CreditDecisionService creditDecisionService(
             CreditApplicationRepositoryPort applicationRepositoryPort,
             CreditDecisionRepositoryPort decisionRepositoryPort,
             ScoringModelPort scoringModelPort,
+            ModelRegistryService modelRegistryService,
             CreditPolicyProperties creditPolicyProperties,
             TransactionRunner transactionRunner,
             Clock clock) {
@@ -54,6 +78,7 @@ public class BeanWiringConfig {
                 applicationRepositoryPort,
                 decisionRepositoryPort,
                 scoringModelPort,
+                modelRegistryService,
                 creditPolicyProperties.toDomain(),
                 transactionRunner,
                 clock);

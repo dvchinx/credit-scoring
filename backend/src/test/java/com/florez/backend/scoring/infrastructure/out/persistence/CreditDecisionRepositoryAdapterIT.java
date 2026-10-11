@@ -7,6 +7,9 @@ import com.florez.backend.TestcontainersConfig;
 import com.florez.backend.creditapplication.domain.model.CreditApplication;
 import com.florez.backend.creditapplication.domain.model.CreditHistory;
 import com.florez.backend.creditapplication.domain.port.out.CreditApplicationRepositoryPort;
+import com.florez.backend.modelregistry.ModelRegistryTestData;
+import com.florez.backend.modelregistry.domain.model.ModelVersion;
+import com.florez.backend.modelregistry.domain.port.out.ModelVersionRepositoryPort;
 import com.florez.backend.scoring.ScoringTestData;
 import com.florez.backend.scoring.domain.model.ApplicationSnapshot;
 import com.florez.backend.scoring.domain.model.CreditDecision;
@@ -18,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -29,6 +33,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Import(TestcontainersConfig.class)
 class CreditDecisionRepositoryAdapterIT {
 
+    private static final String MODEL_VERSION = "20261004T120000Z";
+
     @Autowired
     private CreditDecisionRepositoryAdapter adapter;
 
@@ -37,6 +43,16 @@ class CreditDecisionRepositoryAdapterIT {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ModelVersionRepositoryPort modelVersions;
+
+    @BeforeEach
+    void registerModelVersion() {
+        if (!modelVersions.exists(MODEL_VERSION)) {
+            modelVersions.save(new ModelVersion(ModelRegistryTestData.artifact(MODEL_VERSION), "admin", Instant.now()));
+        }
+    }
 
     private CreditApplication persistedApplication(String documentId) {
         return applicationRepository.save(CreditApplication.createNew(
@@ -48,7 +64,7 @@ class CreditDecisionRepositoryAdapterIT {
     private CreditDecision completedDecision(CreditApplication application, Instant decidedAt) {
         ModelFeatures features = ModelFeatures.from(application, LocalDate.of(2026, 10, 4));
         return CreditDecision.completed(application.getId(), ApplicationSnapshot.of(application), features,
-                ScoringTestData.risk(0.42, "20261004T120000Z"), ScoringTestData.explanation("20261004T120000Z"),
+                ScoringTestData.risk(0.42, MODEL_VERSION), ScoringTestData.explanation(MODEL_VERSION),
                 ScoringTestData.POLICY, new PolicyResult(DecisionOutcome.MANUAL_REVIEW, List.of("entre umbrales")),
                 "analyst1", decidedAt);
     }
@@ -110,6 +126,19 @@ class CreditDecisionRepositoryAdapterIT {
         assertThatThrownBy(() -> jdbcTemplate.update("DELETE FROM credit_decisions WHERE id = ?", saved.getId()))
                 .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("append-only");
+    }
+
+    @Test
+    void laBaseDeDatosRechazaUnaDecisionConUnaVersionDeModeloNoRegistrada() {
+        CreditApplication application = persistedApplication("DEC-IT-6");
+        CreditDecision unregistered = CreditDecision.completed(application.getId(), ApplicationSnapshot.of(application),
+                ModelFeatures.from(application, LocalDate.of(2026, 10, 4)), ScoringTestData.risk(0.1, "nunca-registrada"),
+                ScoringTestData.explanation("nunca-registrada"), ScoringTestData.POLICY,
+                new PolicyResult(DecisionOutcome.APPROVED, List.of("ok")), "analyst1", Instant.now());
+
+        assertThatThrownBy(() -> adapter.save(unregistered))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("fk_credit_decisions_model_version");
     }
 
     @Test

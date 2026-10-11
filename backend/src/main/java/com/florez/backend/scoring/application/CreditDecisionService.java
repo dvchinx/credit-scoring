@@ -4,7 +4,10 @@ import com.florez.backend.common.application.TransactionRunner;
 import com.florez.backend.common.domain.ResourceNotFoundException;
 import com.florez.backend.creditapplication.domain.model.CreditApplication;
 import com.florez.backend.creditapplication.domain.port.out.CreditApplicationRepositoryPort;
+import com.florez.backend.modelregistry.domain.model.ModelActivation;
+import com.florez.backend.modelregistry.domain.port.in.GetModelActivationsUseCase;
 import com.florez.backend.scoring.domain.exception.CreditDecisionFailedException;
+import com.florez.backend.scoring.domain.exception.NoActiveModelVersionException;
 import com.florez.backend.scoring.domain.exception.ScoringUnavailableException;
 import com.florez.backend.scoring.domain.model.ApplicationSnapshot;
 import com.florez.backend.scoring.domain.model.CreditDecision;
@@ -28,6 +31,7 @@ public final class CreditDecisionService implements EvaluateCreditApplicationUse
     private final CreditApplicationRepositoryPort applicationRepository;
     private final CreditDecisionRepositoryPort decisionRepository;
     private final ScoringModelPort scoringModel;
+    private final GetModelActivationsUseCase modelActivations;
     private final DecisionPolicy policy;
     private final TransactionRunner transactionRunner;
     private final Clock clock;
@@ -36,12 +40,14 @@ public final class CreditDecisionService implements EvaluateCreditApplicationUse
             CreditApplicationRepositoryPort applicationRepository,
             CreditDecisionRepositoryPort decisionRepository,
             ScoringModelPort scoringModel,
+            GetModelActivationsUseCase modelActivations,
             DecisionPolicy policy,
             TransactionRunner transactionRunner,
             Clock clock) {
         this.applicationRepository = applicationRepository;
         this.decisionRepository = decisionRepository;
         this.scoringModel = scoringModel;
+        this.modelActivations = modelActivations;
         this.policy = policy;
         this.transactionRunner = transactionRunner;
         this.clock = clock;
@@ -50,6 +56,11 @@ public final class CreditDecisionService implements EvaluateCreditApplicationUse
     @Override
     public CreditDecision evaluate(UUID creditApplicationId, String requestedBy) {
         CreditApplication application = findApplication(creditApplicationId);
+        // La versión se fija aquí y se pide explícitamente al ML: la decisión registra la versión
+        // que estaba activa en el momento de evaluar, nunca una inferida después.
+        String modelVersion = modelActivations.current()
+                .map(ModelActivation::modelVersion)
+                .orElseThrow(NoActiveModelVersionException::new);
         Instant decidedAt = clock.instant();
         ApplicationSnapshot snapshot = ApplicationSnapshot.of(application);
         ModelFeatures features = ModelFeatures.from(application, LocalDate.ofInstant(decidedAt, clock.getZone()));
@@ -59,14 +70,14 @@ public final class CreditDecisionService implements EvaluateCreditApplicationUse
         RiskAssessment risk;
         Explanation explanation;
         try {
-            risk = scoringModel.score(features);
-            explanation = scoringModel.explain(features);
+            risk = scoringModel.score(modelVersion, features);
+            explanation = scoringModel.explain(modelVersion, features);
         } catch (ScoringUnavailableException e) {
             throw recordFailure(application, snapshot, features, e.getMessage(), requestedBy, decidedAt);
         }
-        if (!risk.modelVersion().equals(explanation.modelVersion())) {
-            String reason = "el score (modelo " + risk.modelVersion() + ") y la explicación (modelo "
-                    + explanation.modelVersion() + ") provienen de versiones distintas";
+        if (!modelVersion.equals(risk.modelVersion()) || !modelVersion.equals(explanation.modelVersion())) {
+            String reason = "se pidió el modelo " + modelVersion + " pero el score vino del modelo " + risk.modelVersion()
+                    + " y la explicación del modelo " + explanation.modelVersion();
             throw recordFailure(application, snapshot, features, reason, requestedBy, decidedAt);
         }
 

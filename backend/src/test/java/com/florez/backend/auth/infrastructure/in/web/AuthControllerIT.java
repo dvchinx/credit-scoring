@@ -1,6 +1,7 @@
 package com.florez.backend.auth.infrastructure.in.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,7 +31,33 @@ class AuthControllerIT {
 
         mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(200))
-                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).contains("token"));
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).contains("token"))
+                .andExpect(result -> {
+                    var json = objectMapper.readTree(result.getResponse().getContentAsString());
+                    assertThat(json.get("username").asText()).isEqualTo("admin");
+                    assertThat(json.get("role").asText()).isEqualTo("ADMIN");
+                });
+    }
+
+    @Test
+    void preflightCors_desdeElFrontendConfigurado_seAutoriza() throws Exception {
+        mockMvc.perform(options("/credit-applications")
+                        .header(HttpHeaders.ORIGIN, "http://localhost:5173")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Authorization, Content-Type"))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(200))
+                .andExpect(result -> assertThat(result.getResponse().getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN))
+                        .isEqualTo("http://localhost:5173"));
+    }
+
+    @Test
+    void preflightCors_desdeUnOrigenNoConfigurado_seRechaza() throws Exception {
+        mockMvc.perform(options("/credit-applications")
+                        .header(HttpHeaders.ORIGIN, "https://evil.example")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST"))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(403))
+                .andExpect(result -> assertThat(result.getResponse().getHeader(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN))
+                        .isNull());
     }
 
     @Test

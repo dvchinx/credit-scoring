@@ -1,5 +1,7 @@
 package com.florez.backend.config;
 
+import com.florez.backend.audit.application.AuditService;
+import com.florez.backend.audit.domain.port.out.AuditQueryPort;
 import com.florez.backend.auth.application.AuthService;
 import com.florez.backend.auth.domain.port.out.PasswordHasherPort;
 import com.florez.backend.auth.domain.port.out.TokenIssuerPort;
@@ -104,5 +106,10 @@ public class BeanWiringConfig {
             Clock clock) {
         return new WhatIfService(
                 applicationRepositoryPort, simulationRepositoryPort, whatIfModelPort, modelRegistryService, decisionPolicy, clock);
+    }
+
+    @Bean
+    AuditService auditService(AuditQueryPort auditQueryPort) {
+        return new AuditService(auditQueryPort);
     }
 }

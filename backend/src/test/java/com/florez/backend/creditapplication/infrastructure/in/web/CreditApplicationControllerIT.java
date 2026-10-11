@@ -90,6 +90,25 @@ class CreditApplicationControllerIT {
     }
 
     @Test
+    void list_devuelveUnaPaginaConFormatoEstable() throws Exception {
+        mockMvc.perform(post("/credit-applications")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(samplePayload("CTRL-DOC-PAGE"))));
+
+        String response = mockMvc.perform(get("/credit-applications?page=0&size=5")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode page = objectMapper.readTree(response);
+        assertThat(page.get("content").isArray()).isTrue();
+        assertThat(page.get("page").get("size").asInt()).isEqualTo(5);
+        assertThat(page.get("page").get("number").asInt()).isZero();
+        assertThat(page.get("page").get("totalElements").asLong()).isPositive();
+        assertThat(page.get("page").has("totalPages")).isTrue();
+    }
+
+    @Test
     void create_sinToken_devuelve401() throws Exception {
         String body = objectMapper.writeValueAsString(samplePayload("CTRL-DOC-NOAUTH"));
 

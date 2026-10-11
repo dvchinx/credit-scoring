@@ -32,7 +32,8 @@ public final class AuthService implements AuthenticateUserUseCase, CreateUserUse
         }
 
         TokenIssuerPort.IssuedToken issuedToken = tokenIssuerPort.issue(user.getUsername(), user.getRole());
-        return new AuthenticatedSession(issuedToken.token(), issuedToken.tokenType(), issuedToken.expiresInMs());
+        return new AuthenticatedSession(
+                issuedToken.token(), issuedToken.tokenType(), issuedToken.expiresInMs(), user.getUsername(), user.getRole());
     }
 
     @Override

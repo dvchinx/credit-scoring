@@ -32,7 +32,8 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         AuthenticatedSession session = authenticateUserUseCase.authenticate(request.username(), request.password());
-        return ResponseEntity.ok(new LoginResponse(session.token(), session.tokenType(), session.expiresInMs()));
+        return ResponseEntity.ok(new LoginResponse(
+                session.token(), session.tokenType(), session.expiresInMs(), session.username(), session.role()));
     }
 
     @PostMapping("/users")

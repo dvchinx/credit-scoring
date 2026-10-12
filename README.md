@@ -1,356 +1,112 @@
 # Credit Scoring Engine
 
-Motor de scoring crediticio explicable para el sector financiero. Evalúa el riesgo de un solicitante de crédito, devuelve una decisión (aprobar / rechazar / revisión manual) y explica el porqué de esa decisión de forma trazable y auditable, tal como exige la regulación financiera ("right to explanation").
+[![CI](https://github.com/dvchinx/credit-scoring/actions/workflows/ci.yml/badge.svg)](https://github.com/dvchinx/credit-scoring/actions/workflows/ci.yml)
 
-Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo que el modelo prediga bien, sino demostrar un backend con **auditoría, versionado y governance** de decisiones automatizadas, con explicabilidad como ciudadano de primera clase.
+Motor de scoring crediticio **explicable y auditable**. Evalúa el riesgo de un solicitante, decide (aprobar / rechazar / revisión manual) y **explica por qué**: qué variables subieron o bajaron el riesgo, con qué versión exacta del modelo y bajo qué política. Cada decisión se puede reconstruir meses después, como exige la regulación financiera ("right to explanation").
 
-## Estado actual
+Proyecto de portafolio orientado a roles **Backend + IA**. El foco no es exprimir la métrica del modelo, sino el sistema alrededor: governance de decisiones automatizadas, versionado de modelos y trazabilidad.
 
-- **Fase 1 — Esqueleto backend** completada: autenticación JWT, CRUD de solicitudes de crédito y persistencia en Postgres.
-- **Fase 2 — Servicio de ML base** completada: microservicio Python/FastAPI (`ml-service/`) entrenado sobre el dataset público "Give Me Some Credit", expone `/score`. Ver [ml-service/README.md](ml-service/README.md).
-- **Fase 3 — Explicabilidad** completada: el servicio de ML expone `/explain` (valores SHAP exactos) y el backend evalúa solicitudes y persiste cada decisión con su score, explicación, versión de modelo, política aplicada y snapshot de los datos de entrada.
-- **Fase 4 — Model registry y versionado** completada: cada entrenamiento genera una versión inmutable con metadata completa (dataset, métricas, hiperparámetros, hash del artefacto); el backend registra versiones, decide cuál está activa y guarda el historial de activaciones con su motivo.
+## Qué demuestra
 
-- **Fase 5 — What-if analysis** completada: simulación de cambios en la solicitud con el modelo activo y la política vigente, comparada contra el escenario real y registrada para auditoría sin crear decisiones.
-
-- **Fase 6 — Frontend** completada: SPA en React + TypeScript (`frontend/`) con login, solicitudes, decisiones explicadas con gráfico SHAP, simulador what-if, versiones de modelo y dashboard de auditoría.
-
-Queda la fase de pulido — ver [Roadmap](#roadmap).
+- **Decisiones explicadas por construcción:** ninguna decisión final existe sin su explicación SHAP y su versión de modelo. Lo garantizan el dominio y también la base de datos (`CHECK`, FK y tablas append-only con triggers).
+- **Model registry con governance:** versiones inmutables con metadata completa (dataset, métricas, hiperparámetros, hash SHA-256 del artefacto). La activación es auditada, con motivo obligatorio, y el rollback consiste en activar de nuevo una versión anterior. El backend se niega a activar un artefacto que cambió desde su registro.
+- **What-if analysis honesto:** simula cambios en la solicitud pasando por la misma derivación de variables y la misma política que una decisión real. Compara contra el escenario base evaluado con el mismo modelo y queda registrado para detectar "gaming".
+- **Integración ML seria:** el backend Java y el servicio Python están separados. Un **test de contrato con Testcontainers** levanta el servicio de ML real y ejecuta el flujo completo en cada build.
+- **Arquitectura hexagonal** en el backend (dominio sin Spring ni JPA), con tests unitarios e integración contra Postgres real.
 
 ## Arquitectura
 
-```
-[Frontend (React SPA)] ✅ (fase 6) / [Clientes API]
-        │
-        ▼
-[Spring Boot API] ──► [PostgreSQL] (solicitudes, decisiones, auditoría, versiones de modelo)
-        │
-        ├──► [ML Service (FastAPI)] ──► [Versiones de modelo en disco + SHAP]
-        │           │      /score?model_version= ✅ (fase 2)   /explain ✅ (fase 3)   /models ✅ (fase 4)
-        │           └──► /what-if ✅ (fase 5): ambos escenarios con el mismo modelo cargado
-        │
-        └──► [Model Registry] ✅ (fase 4): versiones registradas + log de activaciones (en PostgreSQL)
-```
+```mermaid
+flowchart LR
+    U[Analista / Admin] --> FE["Frontend<br/>React + TypeScript"]
+    FE -- "REST + JWT" --> API["Backend<br/>Spring Boot · hexagonal"]
+    API -- "JPA · Flyway" --> DB[("PostgreSQL<br/>solicitudes · decisiones<br/>registry · simulaciones")]
+    API -- "HTTP · versión explícita" --> ML["Servicio de ML<br/>FastAPI"]
+    ML --> ART[["Versiones de modelo<br/>model.joblib + metadata.json<br/>SHA-256 verificado"]]
 
-El backend Java es responsable de la orquestación, persistencia y governance; el servicio Python (`ml-service/`, FastAPI) vive en un microservicio separado, responsable exclusivamente de scoring y explicabilidad.
-
-### Model registry y versionado
-
-El backend es la **única fuente de verdad** de qué versión de modelo decide; el servicio de ML no tiene noción de "versión activa" y sirve la versión exacta que se le pide.
-
-```
-entrenar (ml-service)  ──►  models/<version>/  model.joblib + metadata.json   (inmutable; nunca se sobreescribe)
-        │
-POST /model-versions   ──►  el backend lee la metadata desde GET /models/{version} y la guarda en model_versions
-        │
-POST /model-activations ─►  {version, reason}: se inserta en model_activations; la última activación es la vigente
-        │
-POST .../decisions     ──►  /score?model_version=<activa>  y  /explain?model_version=<activa>
+    subgraph ml [" "]
+        ML
+        ART
+    end
 ```
 
-- **Metadata por versión:** algoritmo e hiperparámetros, fecha de entrenamiento, huella SHA-256 del dataset, filas de entrenamiento/test y tasa de default, métricas (ROC-AUC, Brier) y variables de entrada. La metadata se toma del servicio de ML, nunca del cliente que registra.
-- **Integridad del artefacto:** al entrenar se calcula el SHA-256 de `model.joblib`. El servicio de ML se niega a servir una versión cuyo archivo ya no coincide (`409`). El backend no registra artefactos alterados y, al activar, exige que el hash que sirve el ML sea **el mismo que se registró**.
-- **Compatibilidad:** solo se registran versiones cuyas variables de entrada coinciden con las que el backend sabe calcular.
-- **Activación auditada:** cada activación guarda quién, cuándo y por qué (motivo obligatorio). Un rollback es activar de nuevo una versión anterior; el historial completo responde "qué modelo decidía en tal fecha".
-- **Append-only:** `model_versions` y `model_activations` rechazan `UPDATE`/`DELETE` por trigger, y `credit_decisions.model_version` tiene FK a `model_versions`.
-- Registrar y activar requieren rol `ADMIN`; consultar, cualquier usuario autenticado.
+| Componente | Responsabilidad |
+| --- | --- |
+| `backend/` | Orquestación, persistencia y governance: qué modelo está activo, política de crédito, decisiones explicadas append-only, simulaciones, auditoría |
+| `ml-service/` | Solo scoring y explicabilidad: `/score`, `/explain`, `/what-if` y catálogo `/models`; verifica la integridad de cada artefacto antes de servirlo |
+| `frontend/` | Solo presentación: muestra lo que decidió el backend, nunca recalcula decisiones ni umbrales |
 
-### Flujo de evaluación (`POST /credit-applications/{id}/decisions`)
+Detalle completo, diagramas de secuencia, modelo de datos y decisiones de diseño: **[docs/architecture.md](docs/architecture.md)**. Referencia del API: **[docs/api.md](docs/api.md)**.
 
-1. Se carga la solicitud y se toma un **snapshot** de sus datos.
-2. Se fija la **versión de modelo activa** en ese momento. Si no hay ninguna, la API responde `409` y no se registra nada.
-3. Se traduce la solicitud a las variables del modelo (ver tabla abajo).
-4. Se llama a `/score` y a `/explain` del servicio de ML **con esa versión explícita**, fuera de cualquier transacción de base de datos.
-5. Si el ML falla, no responde, o responde con una versión distinta de la pedida, se registra una decisión `FAILED` con el motivo, la solicitud sigue `PENDING` y la API responde `503`.
-6. Si todo va bien, la política de crédito (umbrales externalizados) produce `APPROVED` / `REJECTED` / `MANUAL_REVIEW` con sus motivos.
-7. En una sola transacción se inserta la decisión y se actualiza el estado de la solicitud.
+## Probarlo en 3 comandos
 
-Cada evaluación crea una decisión nueva; las anteriores se conservan. La tabla `credit_decisions` es **append-only**: un trigger de Postgres rechaza cualquier `UPDATE` o `DELETE`, y un `CHECK` impide guardar una decisión `COMPLETED` sin score, explicación y versión de modelo.
-
-### What-if analysis (`POST /credit-applications/{id}/what-if`)
-
-Responde "¿qué pasaría si…?" sobre una solicitud: qué decisión tomaría el sistema si el ingreso fuera mayor, el monto menor o la utilización de crédito más baja. Sirve al solicitante ("qué mejorar") y a auditoría interna.
-
-```json
-{"monthlyIncome": 4200, "creditHistory": {"revolvingUtilization": 0.10}}
-```
-
-- **Se simulan datos de la solicitud, no variables crudas del modelo:** los cambios pasan por la misma derivación (`debt_ratio` con la cuota nueva) y la misma política que una decisión real, reglas duras incluidas. Simular un monto mayor puede rechazar por endeudamiento aunque el riesgo del modelo no cambie. Variables simulables: ingreso, monto, plazo, deuda existente, dependientes y todo `creditHistory`. Un campo ausente mantiene su valor real.
-- **Comparación justa:** el escenario real y el simulado se evalúan en la misma llamada a `/what-if` del ML, con la versión activa y la política vigente. La diferencia se debe solo a los cambios, no a que el modelo haya cambiado desde la última decisión.
-- **Atribución exacta:** con un modelo lineal, cambiar una variable solo mueve su propia contribución SHAP. `featureImpacts` muestra, por variable del modelo, el valor y el SHAP en ambos escenarios y su diferencia (`shapDelta`). Cambiar `monthlyIncome` mueve dos variables, `monthly_income` y `debt_ratio`, porque el endeudamiento depende del ingreso.
-- **Nunca es una decisión:** no crea registros en `credit_decisions` ni cambia el estado de la solicitud.
-- **Auditable:** cada simulación se guarda en `what_if_simulations` (append-only, con quién, cuándo, qué cambió y ambos resultados). Las columnas `baseline_outcome`/`scenario_outcome` permiten encontrar rápido las simulaciones que cambiaron el resultado, por ejemplo para detectar si alguien probó variantes hasta encontrar una que aprueba y luego editó la solicitud con esos valores.
-
-Respuesta (resumida, valores ilustrativos):
-
-```json
-{
-  "modelVersion": "20261004T120000Z",
-  "changes": [{"variable": "creditHistory.revolvingUtilization", "baselineValue": 0.35, "scenarioValue": 0.10}],
-  "baseline": {"outcome": "MANUAL_REVIEW", "probabilityOfDefault": 0.41, "riskScore": 625, "reasons": ["..."]},
-  "scenario": {"outcome": "APPROVED", "probabilityOfDefault": 0.27, "riskScore": 701, "reasons": ["..."]},
-  "decisionChanged": true,
-  "probabilityOfDefaultDelta": -0.14,
-  "featureImpacts": [
-    {"feature": "revolving_utilization_of_unsecured_lines", "baselineValue": 0.35, "scenarioValue": 0.10,
-     "baselineShap": 0.21, "scenarioShap": -0.43, "shapDelta": -0.64, "changed": true}
-  ]
-}
-```
-
-### De la solicitud a las variables del modelo
-
-El modelo se entrenó con variables tipo buró de crédito. La solicitud incluye un bloque `creditHistory` con ellas, y el resto se deriva:
-
-| Variable del modelo | Origen |
-|---|---|
-| `age` | Años cumplidos a la fecha de evaluación, desde `birthDate` |
-| `debt_ratio` | (`existingMonthlyDebt` + `requestedAmount` / `loanTermMonths`) / `monthlyIncome`: endeudamiento **incluyendo la cuota nueva** (estimada sin intereses) |
-| `monthly_income`, `number_of_dependents` | Directo de la solicitud |
-| `revolving_utilization_of_unsecured_lines` | `creditHistory.revolvingUtilization` |
-| `number_of_open_credit_lines_and_loans` | `creditHistory.openCreditLines` |
-| `number_real_estate_loans_or_lines` | `creditHistory.realEstateLoans` |
-| `number_of_time_30_59_days_past_due_not_worse` | `creditHistory.latePayments30To59Days` |
-| `number_of_time_60_89_days_past_due_not_worse` | `creditHistory.latePayments60To89Days` |
-| `number_of_times_90_days_late` | `creditHistory.latePayments90DaysOrMore` |
-
-`employmentYears` se guarda en el snapshot pero el modelo actual no lo usa.
-
-### Política de crédito
-
-Configurable por variables de entorno (ver `.env.example`); se guarda con cada decisión para saber qué umbrales se aplicaron:
-
-1. **Reglas duras**, con rechazo sin importar el score: edad mínima (`CREDIT_POLICY_MIN_APPLICANT_AGE`, 18) y endeudamiento máximo con la cuota nueva (`CREDIT_POLICY_MAX_DEBT_RATIO`, 50%).
-2. Probabilidad de default ≥ `CREDIT_POLICY_REJECT_MIN_PD` (0.60): `REJECTED`.
-3. Probabilidad de default ≤ `CREDIT_POLICY_APPROVE_MAX_PD` (0.30): `APPROVED`.
-4. Entre ambos umbrales: `MANUAL_REVIEW`.
-
-Una política inválida (p. ej. umbral de aprobación ≥ umbral de rechazo) impide arrancar la aplicación.
-
-> El modelo se entrena con `class_weight="balanced"`, así que sus probabilidades no están calibradas a la tasa real de default (~7%). Los umbrales por defecto son ilustrativos y deben revisarse con cada versión del modelo.
-
-### Frontend (`frontend/`)
-
-SPA en React + TypeScript que consume **solo** el API de Spring Boot. Es una capa de presentación: muestra lo que decidió el backend y no recalcula decisiones, scores ni umbrales.
-
-| Pantalla | Qué muestra |
-|---|---|
-| Login | Inicio de sesión; si el JWT expira o el backend responde `401`, vuelve al login con aviso y recuerda la página |
-| Solicitudes | Listado paginado; alta y edición con el bloque `creditHistory`; los errores de validación del backend se muestran junto a cada campo |
-| Detalle | Datos de la solicitud, botón "Evaluar con el modelo activo", historial de decisiones (incluidos los intentos `FAILED` y su motivo) |
-| Decisión | Resultado, probabilidad de default, score, motivos de la política, versión de modelo y gráfico de contribuciones SHAP |
-| Simulador what-if | Solo se envían las variables cambiadas; compara la decisión real con la simulada y el efecto en cada variable del modelo |
-| Modelos (`ADMIN`) | Versiones registradas con métricas, hash del artefacto, versión activa e historial de activaciones |
-| Auditoría | Decisiones por resultado y por versión de modelo, intentos fallidos recientes, simulaciones que cambiaron el resultado |
-
-Decisiones de diseño:
-- **JWT solo en memoria** (no en `localStorage`), para reducir la exposición ante XSS. Contrapartida asumida: al recargar la página hay que iniciar sesión de nuevo.
-- **Roles:** el frontend oculta la sección de modelos a los `ANALYST` solo por usabilidad; quien autoriza es el backend (`403`).
-- **URL del API** por `VITE_API_BASE_URL`, incrustada en el build. El backend solo acepta peticiones de navegador desde los orígenes de `CORS_ALLOWED_ORIGINS`.
-- **Carga diferida:** las páginas con gráficos (Recharts) se cargan bajo demanda, así que login y listado no descargan la librería de gráficos.
-- Organizado por feature (`features/auth`, `credit-applications`, `decisions`, `what-if`, `models`, `audit`) con un cliente HTTP tipado (`src/api`) cuyos tipos reflejan los DTOs del backend.
-
-### Backend: arquitectura hexagonal (ports & adapters)
-
-Cada feature (`auth`, `creditapplication`) se organiza en tres capas internas, en vez de capas técnicas genéricas a nivel raíz:
-
-```
-com.florez.backend
-├── config/                 Wiring de Spring: seguridad, auditoría JPA, conexión de los servicios de "application" con sus adapters
-├── auth/
-│   ├── domain/              Modelo (User, Role) y ports (in: casos de uso: out: contratos hacia infraestructura) — sin dependencias de Spring/JPA
-│   ├── application/         AuthService: implementa los casos de uso orquestando el dominio a través de los ports
-│   └── infrastructure/
-│       ├── in/web/          AuthController + DTOs
-│       └── out/             Adapters: persistencia (JPA), seguridad (JWT, BCrypt)
-├── creditapplication/       Mismo esquema domain → application → infrastructure
-├── scoring/                 Evaluación y decisiones: política de crédito, explicación SHAP, cliente HTTP del servicio de ML,
-│                            persistencia append-only de decisiones
-├── modelregistry/           Versiones de modelo registradas, activaciones auditadas, catálogo del servicio de ML
-├── whatif/                  Simulación de escenarios sobre una solicitud y su registro de auditoría
-├── audit/                   Resumen de solo lectura (agregados SQL) para el dashboard de auditoría
-└── common/                  Excepciones de dominio, manejo de errores centralizado, entidad base de auditoría JPA,
-                             TransactionRunner (port para delimitar transacciones sin acoplar los casos de uso a Spring)
-```
-
-**Regla de dependencia:** `domain` no conoce Spring ni JPA; `application` solo depende de `domain` (los ports); `infrastructure` implementa los ports de salida y consume los casos de uso, nunca al revés.
-
-## Stack técnico
-
-- **Backend:** Java 21 + Spring Boot 4 (Spring Web, Spring Data JPA, Spring Security con JWT, Bean Validation)
-- **Base de datos:** PostgreSQL, migraciones versionadas con Flyway (nunca `ddl-auto`)
-- **Auditoría de solicitudes:** timestamps automáticos (`createdAt`/`updatedAt`) y soft-delete (`deletedAt`), acorde al enfoque de trazabilidad del proyecto
-- **Seguridad:** JWT stateless (JJWT), contraseñas con BCrypt, roles `ADMIN` / `ANALYST`
-- **Observabilidad:** Spring Actuator + logs estructurados en JSON (Logstash encoder)
-- **Testing:** JUnit 5 + Mockito (unitarios) y Testcontainers + Postgres real (integración)
-- **Servicio de ML:** Python + FastAPI (`ml-service/`), scikit-learn (Regresión Logística), SHAP, pytest — ver [ml-service/README.md](ml-service/README.md)
-- **Integración backend → ML:** `RestClient` de Spring sobre HTTP/1.1 con timeouts configurables; los fallos se registran como decisiones `FAILED`
-- **Frontend:** React 19 + TypeScript (Vite), React Router, TanStack Query, Recharts; Vitest + Testing Library
-- **Infraestructura:** Docker Compose para Postgres, el servicio de ML y el frontend (build estático servido por nginx)
-
-## Cómo levantar el entorno
-
-### 1. Variables de entorno
+Requiere Docker.
 
 ```bash
-cp .env.example .env
-# editar .env: credenciales de Postgres, JWT_SECRET (mínimo 32 caracteres) y el admin inicial
+cp .env.example .env                 # credenciales de desarrollo; cambia JWT_SECRET y ADMIN_PASSWORD fuera de local
+docker compose up -d --build         # Postgres, servicio de ML, backend y frontend
+./scripts/demo.sh                    # entrena, registra y activa un modelo; crea y evalúa solicitudes de ejemplo
 ```
 
-### 2. Base de datos y servicio de ML
+Después, abre **<http://localhost:3000>** y entra como `admin` (contraseña: `ADMIN_PASSWORD` del `.env`). La demo deja tres solicitudes evaluadas (aprobada, revisión manual y rechazada) y una simulación what-if que cambia la decisión.
+
+> Sin el dataset real, la demo entrena con un **dataset sintético** con relaciones de riesgo coherentes: más moras, más utilización y más endeudamiento suben el riesgo. Sirve para recorrer el sistema, pero sus métricas no dicen nada del mundo real. Para usar el dataset real ["Give Me Some Credit"](https://www.kaggle.com/c/GiveMeSomeCredit/data), descarga `cs-training.csv` en `ml-service/data/raw/` antes de ejecutar la demo.
+
+### Desarrollo local (sin contenedores para el backend y el frontend)
 
 ```bash
-docker-compose up -d
-# entrenar un modelo (requiere data/raw/cs-training.csv, ver ml-service/README.md); imprime la versión creada
-docker-compose exec ml-service python -m training.train
+docker compose up -d postgres ml-service
+cd backend && bash mvnw spring-boot:run                          # API en :8080
+cd frontend && cp .env.example .env && npm install && npm run dev  # SPA en :5173
 ```
 
-### 3. Backend
+`./scripts/demo.sh` también funciona con este modo: entrena en el contenedor del ML y habla con el backend en `:8080`.
 
-```bash
-cd backend
-./mvnw spring-boot:run
-```
-
-Al arrancar por primera vez (tabla `users` vacía), se crea automáticamente el usuario `ADMIN` inicial con las credenciales de `ADMIN_USERNAME` / `ADMIN_PASSWORD` definidas en `.env` — nunca hay credenciales hardcodeadas en el código.
-
-### 4. Frontend
-
-```bash
-cd frontend
-cp .env.example .env          # VITE_API_BASE_URL=http://localhost:8080
-npm install
-npm run dev                   # http://localhost:5173
-```
-
-O con Docker, como build estático servido por nginx en http://localhost:3000 (ya incluido en `docker-compose up -d`):
-
-```bash
-docker-compose up -d --build frontend
-```
-
-Para entrar como `admin`, primero hay que registrar y activar una versión de modelo (paso 5) para poder evaluar solicitudes.
-
-### 5. Probar la API
-
-```bash
-# Login
-curl -X POST http://localhost:8080/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"<ADMIN_PASSWORD del .env>"}'
-
-# Crear una solicitud de crédito (usar el token devuelto arriba)
-curl -X POST http://localhost:8080/credit-applications \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "applicantFullName": "Ada Lovelace",
-        "documentId": "DOC-001",
-        "birthDate": "1990-05-10",
-        "monthlyIncome": 3500.00,
-        "requestedAmount": 12000.00,
-        "loanTermMonths": 24,
-        "employmentYears": 4.5,
-        "existingMonthlyDebt": 200.00,
-        "numberOfDependents": 1,
-        "creditHistory": {
-          "revolvingUtilization": 0.3,
-          "openCreditLines": 5,
-          "realEstateLoans": 1,
-          "latePayments30To59Days": 0,
-          "latePayments60To89Days": 0,
-          "latePayments90DaysOrMore": 0
-        }
-      }'
-
-# Registrar y activar la versión de modelo entrenada (como ADMIN)
-curl -X POST http://localhost:8080/model-versions \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"version": "<versión impresa por training.train>"}'
-curl -X POST http://localhost:8080/model-activations \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"version": "<versión>", "reason": "Primera versión en producción"}'
-
-# Evaluar la solicitud (usar el id devuelto al crearla)
-curl -X POST http://localhost:8080/credit-applications/<id>/decisions \
-  -H "Authorization: Bearer <token>"
-```
-
-Respuesta (resumida, valores ilustrativos):
-
-```json
-{
-  "status": "COMPLETED",
-  "outcome": "APPROVED",
-  "probabilityOfDefault": 0.18,
-  "riskScore": 751,
-  "modelVersion": "20261004T120000Z",
-  "reasons": ["Probabilidad de default de 18.0% dentro del umbral de aprobación de 30.0%"],
-  "explanation": {
-    "baseValue": -0.41,
-    "outputValue": -1.52,
-    "contributions": [
-      {"feature": "age", "value": 36, "shapValue": -0.62, "direction": "DECREASES_RISK"},
-      {"feature": "revolving_utilization_of_unsecured_lines", "value": 0.3, "shapValue": -0.31, "direction": "DECREASES_RISK"}
-    ]
-  },
-  "modelInput": {"revolving_utilization_of_unsecured_lines": 0.3, "age": 36, "debt_ratio": 0.2, "...": "..."},
-  "policy": {"approveMaxProbability": 0.3, "rejectMinProbability": 0.6, "maxDebtRatio": 0.5, "minApplicantAge": 18}
-}
-```
-
-Los valores SHAP están en log-odds de default: `baseValue + Σ shapValue = outputValue`. `modelInput` es exactamente el payload que recibió el modelo, así que se puede reenviar a `/score` para reproducir el resultado.
-
-## Endpoints
-
-| Método | Ruta | Auth | Descripción |
-|---|---|---|---|
-| POST | `/auth/login` | público | Devuelve un JWT, junto con `username` y `role` |
-| POST | `/auth/users` | `ADMIN` | Crea un usuario analista/admin |
-| POST | `/credit-applications` | JWT | Crea una solicitud de crédito |
-| GET | `/credit-applications` | JWT | Lista solicitudes (paginado, excluye eliminadas) |
-| GET | `/credit-applications/{id}` | JWT | Detalle de una solicitud |
-| PUT | `/credit-applications/{id}` | JWT | Actualiza una solicitud |
-| DELETE | `/credit-applications/{id}` | JWT | Elimina una solicitud (soft-delete) |
-| POST | `/credit-applications/{id}/decisions` | JWT | Evalúa la solicitud con el modelo activo y crea una decisión explicada (`409` si no hay modelo activo, `503` si el ML no está disponible) |
-| GET | `/credit-applications/{id}/decisions` | JWT | Historial de decisiones de la solicitud, de la más reciente a la más antigua |
-| POST | `/credit-applications/{id}/what-if` | JWT | Simula cambios en la solicitud y compara la decisión simulada con la real; no crea decisiones (`409` si no hay modelo activo) |
-| GET | `/credit-applications/{id}/what-if` | JWT | Simulaciones hechas sobre la solicitud, de la más reciente a la más antigua |
-| POST | `/model-versions` | `ADMIN` | Registra una versión entrenada (`{"version"}`); la metadata se lee del servicio de ML |
-| GET | `/model-versions` | JWT | Versiones registradas con su metadata y cuál está activa |
-| GET | `/model-versions/{version}` | JWT | Detalle de una versión |
-| POST | `/model-activations` | `ADMIN` | Activa una versión registrada (`{"version", "reason"}`); también sirve para rollback |
-| GET | `/model-activations` | JWT | Historial de activaciones, de la más reciente a la más antigua |
-| GET | `/model-activations/current` | JWT | Activación vigente (`404` si no hay ninguna) |
-| GET | `/audit/summary` | JWT | Agregados para auditoría: decisiones por resultado y por versión de modelo, intentos fallidos recientes, simulaciones |
-| GET | `/actuator/health` | público | Estado del servicio |
-
-Los listados paginados responden `{"content": [...], "page": {"size", "number", "totalElements", "totalPages"}}`.
+Al arrancar por primera vez se crea el usuario `ADMIN` inicial con `ADMIN_USERNAME` / `ADMIN_PASSWORD` del `.env`; no hay credenciales en el código.
 
 ## Tests
 
-```bash
-cd backend
-./mvnw test      # unitarios (JUnit 5 + Mockito)
-./mvnw verify     # unitarios + integración (Testcontainers levanta un Postgres efímero; requiere Docker)
+| Suite | Comando | Qué cubre |
+| --- | --- | --- |
+| Backend unitarios | `cd backend && bash mvnw test` | Dominio (política, invariantes de decisiones, derivación de variables), casos de uso con Mockito, adaptadores HTTP |
+| Backend integración | `cd backend && bash mvnw verify` | Testcontainers con Postgres real: API completa, seguridad, migraciones, triggers append-only y `CHECK` |
+| Contrato backend ↔ ML | incluido en `verify` | `MlServiceContractIT` construye el servicio de ML desde su Dockerfile, entrena al arrancar y ejecuta evaluación y what-if de punta a punta |
+| Servicio de ML | `cd ml-service && pytest` | API, registry con integridad de artefactos, entrenamiento inmutable, SHAP en forma cerrada vs. `shap.LinearExplainer` |
+| Frontend | `cd frontend && npm test` | Rutas reales sobre un `fetch` simulado: sesión y expiración, errores por campo, decisiones, what-if, permisos por rol |
 
-cd ../frontend
-npm test          # Vitest + Testing Library (fetch simulado; no necesita backend)
-npm run build     # typecheck + build de producción
+El [workflow de CI](.github/workflows/ci.yml) ejecuta las tres suites en cada push y pull request.
 
-cd ../ml-service
-pytest
+¿Por qué un test de contrato aparte? Durante tres fases todos los tests pasaban, pero ninguna evaluación funcionaba contra el ML real: el cliente HTTP del JDK negociaba HTTP/2 y uvicorn descartaba el cuerpo del POST. Los mocks no abren conexiones, así que no podían verlo. La historia completa está en [docs/architecture.md](docs/architecture.md#lección-el-test-de-contrato).
+
+## Stack
+
+- **Backend:** Java 21 · Spring Boot 4 (Web, Data JPA, Security con JWT, Validation) · Flyway · JUnit 5, Mockito, Testcontainers
+- **Base de datos:** PostgreSQL 16
+- **ML:** Python 3.12 · FastAPI · scikit-learn (regresión logística) · SHAP · pytest
+- **Frontend:** React 19 · TypeScript · Vite · React Router · TanStack Query · Recharts · Vitest + Testing Library
+- **Infraestructura:** Docker Compose · nginx · GitHub Actions
+- **Observabilidad:** Spring Actuator y logs estructurados en JSON
+
+## Estructura del repositorio
+
+```text
+├── backend/          API Spring Boot (hexagonal: domain → application → infrastructure por feature)
+├── ml-service/       Servicio de ML: entrenamiento, registry en disco y API FastAPI
+├── frontend/         SPA React + TypeScript
+├── docs/             Arquitectura, decisiones de diseño y referencia del API
+├── scripts/demo.sh   Deja el sistema listo para explorar
+└── docker-compose.yml
 ```
 
 ## Roadmap
 
-1. ✅ **Fase 1 — Esqueleto backend:** CRUD de solicitudes, JWT, Postgres.
-2. ✅ **Fase 2 — Servicio de ML base:** microservicio FastAPI entrenado sobre un dataset público ("Give Me Some Credit"), expone `/score`.
-3. ✅ **Fase 3 — Explicabilidad:** `/explain` con valores SHAP, decisiones explicadas y append-only en el backend.
-4. ✅ **Fase 4 — Model registry y versionado:** versiones inmutables con metadata completa y hash verificado, activación auditada con rollback, decisiones ligadas a su versión.
-5. ✅ **Fase 5 — What-if analysis:** simulación de cambios en la solicitud con la misma derivación y política que una decisión real, atribución por variable y registro auditable.
-6. ✅ **Fase 6 — Frontend:** SPA en React + TypeScript (Vite) sobre el API de Spring Boot: login, gestión de solicitudes, historial de decisiones con gráfico de contribuciones SHAP, simulador what-if, versiones de modelo y dashboard de auditoría. Solo presentación: las decisiones las toma siempre el backend.
-7. **Fase 7 — Pulido:** documentación ampliada, README con diagramas.
+1. ✅ **Esqueleto backend:** CRUD de solicitudes, JWT, Postgres.
+2. ✅ **Servicio de ML base:** FastAPI con `/score` sobre "Give Me Some Credit".
+3. ✅ **Explicabilidad:** SHAP exacto y decisiones explicadas append-only.
+4. ✅ **Model registry y versionado:** versiones inmutables con hash verificado, activación auditada y rollback.
+5. ✅ **What-if analysis:** simulación con la misma derivación y política que una decisión real, registrada para auditoría.
+6. ✅ **Frontend:** SPA con decisiones explicadas, simulador, registry y dashboard de auditoría.
+7. ✅ **Pulido:** test de contrato con Testcontainers, stack completo en Docker Compose con demo, CI y documentación con diagramas.
 
 ## Licencia
 

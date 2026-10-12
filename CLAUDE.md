@@ -14,7 +14,7 @@ Este es un proyecto de portafolio orientado a roles **Backend + IA**. El objetiv
 
 ## Stack técnico
 
-- **Backend:** Java 21 + Spring Boot 3.x
+- **Backend:** Java 21 + Spring Boot 4.x
   - Spring Web (API REST)
   - Spring Data JPA
   - Spring Security (JWT) para autenticación de la API
@@ -114,10 +114,11 @@ Flujo de una solicitud de crédito:
 ## Comandos útiles
 
 ```bash
-docker-compose up -d                         # Postgres, servicio de ML y frontend (nginx en :3000)
+docker compose up -d --build                 # stack completo: Postgres, ML, backend (:8080) y frontend (:3000)
+./scripts/demo.sh                            # entrena, registra y activa un modelo; crea y evalúa solicitudes de ejemplo
 cd backend && bash mvnw spring-boot:run      # backend (mvnw no tiene bit de ejecución: invocarlo con bash)
 cd backend && bash mvnw test                 # tests unitarios del backend
-cd backend && bash mvnw verify               # unitarios + integración (Testcontainers; requiere Docker)
+cd backend && bash mvnw verify               # unitarios + integración + contrato con el ML real (Testcontainers; requiere Docker)
 cd ml-service && pytest                      # tests del servicio de ML
 cd frontend && npm run dev                   # frontend en desarrollo (:5173; requiere frontend/.env)
 cd frontend && npm test                      # tests del frontend (Vitest)

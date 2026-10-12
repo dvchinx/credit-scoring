@@ -18,8 +18,14 @@ const TONES: Record<ApplicationStatus | DecisionOutcome | "FAILED", string> = {
   FAILED: "bad",
 };
 
-export function StatusBadge({ value }: { value: ApplicationStatus | DecisionOutcome | "FAILED" }) {
-  return <span className={`badge badge-${TONES[value]}`}>{LABELS[value]}</span>;
+export function StatusBadge({
+  value,
+  size,
+}: {
+  value: ApplicationStatus | DecisionOutcome | "FAILED";
+  size?: "lg";
+}) {
+  return <span className={`badge badge-${TONES[value]}${size ? ` badge-${size}` : ""}`}>{LABELS[value]}</span>;
 }
 
 export function statusLabel(value: ApplicationStatus | DecisionOutcome | "FAILED"): string {

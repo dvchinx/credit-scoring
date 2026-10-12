@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { ApiError } from "../../api/client";
 import type { CreditApplicationRequest } from "../../api/types";
 
@@ -65,10 +65,12 @@ function toRequest(values: Values): CreditApplicationRequest {
 export function ApplicationForm({
   initial,
   submitLabel,
+  cancel,
   onSubmit,
 }: {
   initial?: CreditApplicationRequest;
   submitLabel: string;
+  cancel?: ReactNode;
   onSubmit: (request: CreditApplicationRequest) => Promise<unknown>;
 }) {
   const [values, setValues] = useState<Values>(() => toValues(initial));
@@ -114,28 +116,46 @@ export function ApplicationForm({
     );
   }
 
+  function section(id: string, title: string, description: string, fields: FieldSpec[]) {
+    return (
+      <section className="form-section">
+        <div className="form-section-intro">
+          <h2 id={id}>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <fieldset aria-labelledby={id}>
+          <div className="grid">{fields.map(renderField)}</div>
+        </fieldset>
+      </section>
+    );
+  }
+
   return (
-    <form className="form" onSubmit={handleSubmit} noValidate>
-      <fieldset>
-        <legend>Solicitante</legend>
-        <div className="grid">{APPLICANT_FIELDS.map(renderField)}</div>
-      </fieldset>
-      <fieldset>
-        <legend>Crédito solicitado</legend>
-        <div className="grid">{LOAN_FIELDS.map(renderField)}</div>
-      </fieldset>
-      <fieldset>
-        <legend>Historial crediticio</legend>
-        <div className="grid">{HISTORY_FIELDS.map(renderField)}</div>
-      </fieldset>
+    <form className="form panel" onSubmit={handleSubmit} noValidate>
+      {section("section-applicant", "Solicitante", "Datos personales e ingresos de quien pide el crédito.", APPLICANT_FIELDS)}
+      {section(
+        "section-loan",
+        "Crédito solicitado",
+        "La cuota nueva se suma a la deuda existente para calcular el endeudamiento.",
+        LOAN_FIELDS,
+      )}
+      {section(
+        "section-history",
+        "Historial crediticio",
+        "Comportamiento de pago reportado por los burós de crédito.",
+        HISTORY_FIELDS,
+      )}
       {error && (
         <p role="alert" className="error">
           {error.message}
         </p>
       )}
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Guardando…" : submitLabel}
-      </button>
+      <div className="form-actions">
+        {cancel}
+        <button type="submit" disabled={submitting}>
+          {submitting ? "Guardando…" : submitLabel}
+        </button>
+      </div>
     </form>
   );
 }

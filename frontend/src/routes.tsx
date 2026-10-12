@@ -19,7 +19,7 @@ const ModelVersionsPage = lazy(() =>
 );
 
 function Lazy({ children }: { children: ReactNode }) {
-  return <Suspense fallback={<p className="muted">Cargando…</p>}>{children}</Suspense>;
+  return <Suspense fallback={<p className="loading">Cargando…</p>}>{children}</Suspense>;
 }
 
 /** Rutas de la app; los tests las montan en un router en memoria con una sesión inicial. */
@@ -56,7 +56,7 @@ export function buildRoutes(baseUrl: string, initialSession: Session | null = nu
                 </RequireRole>
               ),
             },
-            { path: "*", element: <p className="muted">Página no encontrada.</p> },
+            { path: "*", element: <div className="panel empty"><strong>Página no encontrada</strong>Revisa la dirección o vuelve a las solicitudes.</div> },
           ],
         },
       ],

@@ -11,3 +11,7 @@ export function ErrorMessage({ error }: { error: unknown }) {
     </p>
   );
 }
+
+export function Loading({ label = "Cargando…" }: { label?: string }) {
+  return <p className="loading">{label}</p>;
+}

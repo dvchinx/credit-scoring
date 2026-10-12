@@ -20,7 +20,7 @@ export function RequireRole({ role, children }: { role: Role; children: ReactNod
   const { session } = useAuth();
   if (session?.role !== role) {
     return (
-      <section className="panel">
+      <section className="panel empty">
         <h1>Acceso restringido</h1>
         <p className="muted">Esta sección requiere el rol {role}.</p>
       </section>

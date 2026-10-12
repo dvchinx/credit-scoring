@@ -20,6 +20,17 @@ pip install -r requirements-dev.txt
 
 ## Entrenar el modelo
 
+### Sin el dataset real: dataset sintético para demo
+
+```bash
+python -m training.synthetic --output data/raw/synthetic-demo.csv
+python -m training.train --input data/raw/synthetic-demo.csv
+```
+
+`training/synthetic.py` genera datos con el esquema de Kaggle y etiquetas derivadas de una relación de riesgo coherente (más moras, utilización y endeudamiento suben el riesgo; más ingreso y edad lo bajan), así que las decisiones y explicaciones de la demo tienen sentido. Es **solo para demos y tests**: sus métricas no dicen nada del mundo real, y las versiones entrenadas con él quedan identificadas por `dataset.source`. Lo usan `scripts/demo.sh` y el test de contrato del backend.
+
+### Con el dataset real
+
 1. Descargar `cs-training.csv` desde Kaggle y ubicarlo en `data/raw/cs-training.csv`.
 2. Ejecutar:
 
@@ -117,7 +128,7 @@ Desde la raíz del repo:
 docker-compose up -d ml-service
 ```
 
-El contenedor monta `./ml-service/models` y `./ml-service/data`, así que el entrenamiento (`docker-compose exec ml-service python -m training.train`) persiste los artefactos también en el host.
+El contenedor monta `./ml-service/models` y `./ml-service/data`, así que el entrenamiento (`docker compose exec ml-service python -m training.train`) persiste los artefactos también en el host. El contenedor corre con un usuario sin privilegios (uid 1000), de modo que esos archivos quedan a nombre de tu usuario y no de root.
 
 ## Nota sobre integración con el backend
 
